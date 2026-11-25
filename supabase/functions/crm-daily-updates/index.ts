@@ -59,13 +59,14 @@ const nm = (s: string) => String(s || "").replace(/\s*\+\s*$/, "").trim();
 // one property's figures for one range, the browser task's way
 function figures(api: any, pid: number) {
   const p = (api.projects || []).find((x: any) => Number(x.business_unit_id) === pid);
-  const out: any = { q: 0, v: 0, aq: 0, av: 0, src: {} as Record<string, { q: number; v: number }>, pageQ: 0, pageV: 0, excluded: [] as any[] };
+  // l = leads (added to the CRM report 23 Nov 2026), counted by the same source rules as Qualified
+  const out: any = { l: 0, q: 0, v: 0, aq: 0, av: 0, src: {} as Record<string, { q: number; v: number }>, pageQ: 0, pageV: 0, excluded: [] as any[] };
   for (const s of (p && p.sources) || []) {
-    const name = nm(s.source), q = Number(s.total?.qualified) || 0, v = Number(s.total?.site_visited) || 0;
+    const name = nm(s.source), q = Number(s.total?.qualified) || 0, v = Number(s.total?.site_visited) || 0, l = Number(s.total?.leads) || 0;
     out.pageQ += q; out.pageV += v;
     if (name.includes("(")) { out.excluded.push({ source: name, q, v }); continue; }
     if (/^agent/i.test(name)) { out.aq += q; out.av += v; out.src.Agent = { q: (out.src.Agent?.q || 0) + q, v: (out.src.Agent?.v || 0) + v }; out.excluded.push({ source: name, q, v }); continue; }
-    if (COUNTED.includes(name)) { out.q += q; out.v += v; out.src[name] = { q: (out.src[name]?.q || 0) + q, v: (out.src[name]?.v || 0) + v }; continue; }
+    if (COUNTED.includes(name)) { out.l += l; out.q += q; out.v += v; out.src[name] = { q: (out.src[name]?.q || 0) + q, v: (out.src[name]?.v || 0) + v }; continue; }
     out.excluded.push({ source: name, q, v });
   }
   return out;
@@ -74,23 +75,23 @@ function figures(api: any, pid: number) {
 async function rowsFor(date: string) {
   const first = date.slice(0, 8) + "01", mFrom = date.slice(8) === "01" ? date : first;
   const [M, Y] = await Promise.all([readApi(mFrom, date), readApi(date, date)]);
-  const rows: any[] = []; const tot = { mq: 0, yq: 0, mv: 0, yv: 0, amv: 0, ayv: 0 };
+  const rows: any[] = []; const tot = { ml: 0, yl: 0, mq: 0, yq: 0, mv: 0, yv: 0, amv: 0, ayv: 0 };
   for (const P of PROPS) {
     const m = figures(M, P.pid), y = figures(Y, P.pid);
     const bd: any = {};
     for (const s of COUNTED.concat(["Agent"])) bd[s] = { month: { q: m.src[s]?.q ?? (s === "Agent" ? 0 : null), v: m.src[s]?.v ?? (s === "Agent" ? 0 : null) },
       yesterday: { q: y.src[s]?.q ?? (s === "Agent" ? 0 : null), v: y.src[s]?.v ?? (s === "Agent" ? 0 : null) } };
     const r = { report_date: date, property_key: P.key, property_label: P.label, realtybucket_project_id: P.pid, sort_order: P.sort, is_total: false,
-      month_qualified: m.q, yesterday_qualified: y.q, month_visits: m.v, yesterday_visits: y.v, agent_month_visits: m.av, agent_yesterday_visits: y.av,
+      month_leads: m.l, yesterday_leads: y.l, month_qualified: m.q, yesterday_qualified: y.q, month_visits: m.v, yesterday_visits: y.v, agent_month_visits: m.av, agent_yesterday_visits: y.av,
       source_breakdown: bd,
       verification: { source: "source_wise_absolute_api", month: { from: mFrom, to: date, pageTotalQ: m.pageQ, pageTotalV: m.pageV, excluded: m.excluded },
         yesterday: { from: date, to: date, pageTotalQ: y.pageQ, pageTotalV: y.pageV, excluded: y.excluded } },
       run_at: new Date().toISOString() };
     rows.push(r);
-    tot.mq += m.q; tot.yq += y.q; tot.mv += m.v; tot.yv += y.v; tot.amv += m.av; tot.ayv += y.av;
+    tot.ml += m.l; tot.yl += y.l; tot.mq += m.q; tot.yq += y.q; tot.mv += m.v; tot.yv += y.v; tot.amv += m.av; tot.ayv += y.av;
   }
   rows.push({ report_date: date, property_key: "total", property_label: "Total", realtybucket_project_id: null, sort_order: 12, is_total: true,
-    month_qualified: tot.mq, yesterday_qualified: tot.yq, month_visits: tot.mv, yesterday_visits: tot.yv, agent_month_visits: tot.amv, agent_yesterday_visits: tot.ayv,
+    month_leads: tot.ml, yesterday_leads: tot.yl, month_qualified: tot.mq, yesterday_qualified: tot.yq, month_visits: tot.mv, yesterday_visits: tot.yv, agent_month_visits: tot.amv, agent_yesterday_visits: tot.ayv,
     source_breakdown: null, verification: null, run_at: new Date().toISOString() });
   return { rows, mFrom };
 }
@@ -100,11 +101,11 @@ async function rowsFor(date: string) {
    stored too, so every mail app's preview shows them). */
 const xmlEsc = (s: string) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 function buildXlsx(date: string, mFrom: string, rows: any[]) {
-  const col = "ABCDEFG";
+  const col = "ABCDEFGHI";
   const str = (ref: string, s: string, st: number) => `<c r="${ref}" s="${st}" t="inlineStr"><is><t xml:space="preserve">${xmlEsc(s)}</t></is></c>`;
   const n = (ref: string, v: number, st = 0) => `<c r="${ref}" s="${st}"><v>${v}</v></c>`;
-  const head = ["Property", "Qualified (Month)", "Qualified (Yesterday)", "Site Visits (Month)", "Site Visits (Yesterday)", "Agent Visits (Month)", "Agent Visits (Yesterday)"];
-  const keys = ["month_qualified", "yesterday_qualified", "month_visits", "yesterday_visits", "agent_month_visits", "agent_yesterday_visits"];
+  const head = ["Property", "Leads (Month)", "Leads (Yesterday)", "Qualified (Month)", "Qualified (Yesterday)", "Site Visits (Month)", "Site Visits (Yesterday)", "Agent Visits (Month)", "Agent Visits (Yesterday)"];
+  const keys = ["month_leads", "yesterday_leads", "month_qualified", "yesterday_qualified", "month_visits", "yesterday_visits", "agent_month_visits", "agent_yesterday_visits"];
   const props = rows.filter((r) => !r.is_total);
   let sd = `<row r="1">${str("A1", "Daily CRM Updates", 1)}</row>`;
   sd += `<row r="2">${str("A2", `Report date: ${date}   |   Month-to-date range: ${mFrom} to ${date}`, 2)}</row>`;
@@ -112,7 +113,7 @@ function buildXlsx(date: string, mFrom: string, rows: any[]) {
   props.forEach((r, i) => { const rn = 5 + i; sd += `<row r="${rn}">${str("A" + rn, r.property_label, 0)}${keys.map((k, c) => n(col[c + 1] + rn, Number(r[k]) || 0)).join("")}</row>`; });
   const tr = 5 + props.length, last = tr - 1;
   sd += `<row r="${tr}">${str("A" + tr, "Total", 4)}${keys.map((k, c) => `<c r="${col[c + 1]}${tr}" s="4"><f>SUM(${col[c + 1]}5:${col[c + 1]}${last})</f><v>${props.reduce((a, r) => a + (Number(r[k]) || 0), 0)}</v></c>`).join("")}</row>`;
-  const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols><col min="1" max="1" width="22" customWidth="1"/><col min="2" max="7" width="22" customWidth="1"/></cols><sheetData>${sd}</sheetData></worksheet>`;
+  const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols><col min="1" max="1" width="22" customWidth="1"/><col min="2" max="9" width="20" customWidth="1"/></cols><sheetData>${sd}</sheetData></worksheet>`;
   const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`
     + `<fonts count="5"><font><sz val="10"/><name val="Arial"/></font><font><b/><sz val="14"/><name val="Arial"/></font><font><i/><sz val="10"/><name val="Arial"/></font><font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Arial"/></font><font><b/><sz val="10"/><name val="Arial"/></font></fonts>`
     + `<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1F2937"/><bgColor indexed="64"/></patternFill></fill></fills>`
@@ -172,7 +173,9 @@ async function run(body: any) {
           for (const k of SAME) if (!h || Number(h[k]) !== Number(r[k])) diffs.push({ property: r.property_key, field: k, browser: h ? h[k] : null, api: r[k] }); }
         rec.ok = true; rec.matched = diffs.length === 0; rec.detail = { diffs, totals: rows.find((r) => r.is_total) };
       } else {
-        const up = await ACC.from("crm_daily_updates").upsert(rows, { onConflict: "report_date,property_key" });
+        let up = await ACC.from("crm_daily_updates").upsert(rows, { onConflict: "report_date,property_key" });
+        // until the leads columns exist (added 23 Nov 2026 20:30 IST) the rows are saved without them
+        if (up.error && /leads/.test(up.error.message)) up = await ACC.from("crm_daily_updates").upsert(rows.map(({ month_leads, yesterday_leads, ...r }: any) => r), { onConflict: "report_date,property_key" });
         if (up.error) throw new Error("crm_daily_updates: " + up.error.message);
         const email = await sendEmail(date, buildXlsx(date, mFrom, rows));
         rec.email = email; rec.ok = !!email.ok; rec.detail = { totals: rows.find((r) => r.is_total) };

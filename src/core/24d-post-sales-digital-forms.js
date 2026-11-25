@@ -200,6 +200,7 @@ const PG_CSS='<style>'
   +'.pg-pkc{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}.pg-pk{display:inline-flex;align-items:center;gap:6px}.pg-pk>b{width:20px;height:20px;border-radius:50%;background:#e5e7eb;color:#4b5563;font-size:11.5px;display:inline-flex;align-items:center;justify-content:center;flex:none}'
   +'.pg-pk .pg-seg button{min-width:0;height:28px;padding:0 9px;font-size:12.5px}'
   // the flat menu: a button that opens a panel with a search box and the flats as tiles under their floor
+  +'.pg-seg.pg-lock{pointer-events:none;opacity:.85}.pg-seg.pg-lock button:not(.on){display:none}.pg-auto{margin-top:4px;font-size:11.5px;color:#1d4ed8}'
   +'.pg-dd{position:relative}.pg-dd-b{display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;cursor:pointer;background:#fff}.pg-dd-b.ph{color:#9aa1ad}.pg-dd-b i{font-size:11px;color:#9aa1ad}'
   +'.pg-dd-p{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:60;background:#fff;border:1px solid #d7dbe2;border-radius:10px;box-shadow:0 12px 30px rgba(16,24,40,.18);padding:10px}'
   +'.pg-dd-m{margin:8px 2px 0;font-size:11.5px;color:#9aa1ad}.pg-dd-l{max-height:250px;overflow:auto;margin-top:4px;padding-right:2px}.pg-dd-e{padding:14px 4px;font-size:13px;color:#9aa1ad;text-align:center}'
@@ -290,9 +291,12 @@ function pgProjApply(p){
   const b=$('pgC_pgBlock'); if(b) b.innerHTML=pgSegH('pgBlock',blocks,blocks[0]||'');
   const h=$('pgC_pgBhk'); if(h) h.innerHTML=pgSegH('pgBhk',bhk,bd);
   pgBlocksFromStock(p);
+  pgBookDefault(p);
   pgFloorPlain(p);
   PG.invMode=false; PG.flFilter=null; pgInvRefresh();
 }
+// the booking amount of the project's payment plan goes in the box, (choosing another project starts again from that project's amount; the Sales person can change it after)
+function pgBookDefault(p){ const e=$('pgBook'); if(!e||!p) return; const v=PG_BOOKAMT[p.key]; e.dataset.touched=''; e.value=v?Number(v).toLocaleString('en-IN'):''; e.dataset.auto=v?'1':''; }
 function pgFloorPlain(p){
   const fl=$('pgC_pgFloor'); if(!fl||!p) return;
   const nf=Math.max(1,Math.floor(Number(p.floors))||8), fs=[]; for(let i=1;i<=nf;i++) fs.push(String(i));
@@ -307,18 +311,28 @@ const PG_INV_PROJ={ananta:[2],dreamgurukul:[1],dreamone:[3,8],dreamvalley:[5],dr
 // Dream World City is Pailan: two stock projects (Dream Jain-Pailan, Dream Gateway Pailan Projects), each with a Block-1, 2, 3 - its blocks carry the stock project's name
 const PG_INV_TAG={9:'Jain Pailan',10:'Gateway Pailan'};
 const PG_INV={st:null,blocks:{},names:{}};
+// the stock writes 3BHK, 2 BHK, 2.5BHK, 5.00BHK; the form says 3 BHK, 2.5 BHK ...
+const pgBhkNorm=function(v){ const m=String(v||'').match(/(\d+(?:\.\d+)?)/); return m?(+m[1])+' BHK':null; };
+/* WHAT A PROJECT'S RECORDS SAY (23 Nov 2026, Ayush: "check Booking Amount in Dream Gurukul, Ananta and DWC"; "check Ananta ... floor plans"):
+   - BOOKING AMOUNT = the first stage of each project's payment plan in Post Sales: Dream Gurukul 'Booking Amount' Rs 2,10,000; Dream Ananta 'Booking Amount' Rs 2,10,000 (its plan is marked incomplete);
+     Dream World City (Dream Jain-Pailan and Dream Gateway Pailan, both) 'On Booking' Rs 50,000 in the plan, but the user set Rs 1,00,000 on 23 Nov 2026. The same for every BHK. Put into the box when the project is chosen; the Sales person can change it.
+   - BHK BY AREA, for a flat whose BHK is not on record: the configurations of the Reckoner (verified 23 Nov 2026) - Dream Ananta 2 BHK 940-1015, 3 BHK 1075-1405, 4 BHK 1790-1805 sq.ft.;
+     Dream Gurukul 2 BHK 860-875, 3 BHK 1225-1290. (The web has no listing of Dream Ananta; the other ranges overlap, so they are not used.) */
+const PG_BOOKAMT={ananta:210000,dreamgurukul:210000,dreamworldcity:100000};
+const PG_BHK_AREA={ananta:[['2 BHK',940,1015],['3 BHK',1075,1405],['4 BHK',1790,1805]],dreamgurukul:[['2 BHK',860,875],['3 BHK',1225,1290]]};
+const pgBhkByArea=function(proj,sba){ const r=(PG_BHK_AREA[proj]||[]).filter(function(x){ return sba>=x[1]&&sba<=x[2]; })[0]; return r?r[0]:null; };
 const pgNorm=function(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,''); };
 async function pgInvLoad(){
   if(PG_INV.st) return; PG_INV.st='load';
   try{
     const all=async function(tbl,cols,fn){ let out=[],f=0; for(;;){ let q=sb.schema('postsales').from(tbl).select(cols); if(fn) q=fn(q); const r=await q.range(f,f+999); if(r.error) throw r.error; out=out.concat(r.data||[]); if((r.data||[]).length<1000) break; f+=1000; } return out; };
-    const res=await Promise.all([all('towers','id,project_id,name',function(q){ return q.is('deleted_at',null).order('id'); }), all('floors','id,floor_no',function(q){ return q.order('id'); }), all('flats','tower_id,floor_id,flat_code,status,sba_sqft',function(q){ return q.is('deleted_at',null).order('id'); })]);
+    const res=await Promise.all([all('towers','id,project_id,name',function(q){ return q.is('deleted_at',null).order('id'); }), all('floors','id,floor_no',function(q){ return q.order('id'); }), all('flats','tower_id,floor_id,flat_code,status,sba_sqft,bhk',function(q){ return q.is('deleted_at',null).order('id'); })]);
     const byProj={}; Object.keys(PG_INV_PROJ).forEach(function(k){ PG_INV_PROJ[k].forEach(function(id){ byProj[id]=k; }); });
     const label=function(t){ return PG_INV_TAG[t.project_id]?t.name+' ('+PG_INV_TAG[t.project_id]+')':t.name; };
     const tw={}, fn={}; res[0].forEach(function(t){ tw[t.id]=t; const k=byProj[t.project_id]; if(!k) return; const nm=(PG_INV.names[k]=PG_INV.names[k]||[]), lb=label(t); if(nm.indexOf(lb)<0) nm.push(lb); }); res[1].forEach(function(x){ fn[x.id]=x.floor_no; });
     res[2].forEach(function(f){ const t=tw[f.tower_id]; if(!t||!byProj[t.project_id]||!f.flat_code) return; const k=byProj[t.project_id], lb=label(t), nb=pgNorm(lb);
       const o=(PG_INV.blocks[k]=PG_INV.blocks[k]||{})[nb]=PG_INV.blocks[k][nb]||{name:lb,flats:[]};
-      o.flats.push({code:String(f.flat_code).toUpperCase(),floor:fn[f.floor_id]==null?null:Number(fn[f.floor_id]),st:f.status}); });
+      o.flats.push({code:String(f.flat_code).toUpperCase(),floor:fn[f.floor_id]==null?null:Number(fn[f.floor_id]),st:f.status,bhk:pgBhkNorm(f.bhk)||pgBhkByArea(k,+f.sba_sqft),sba:f.sba_sqft!=null&&+f.sba_sqft>0?+f.sba_sqft:null}); });
     Object.keys(PG_INV.blocks).forEach(function(k){ Object.keys(PG_INV.blocks[k]).forEach(function(b){ PG_INV.blocks[k][b].flats.sort(function(a,c){ return (a.floor||0)-(c.floor||0)||a.code.localeCompare(c.code,'en',{numeric:true}); }); }); });
     PG_INV.st='ok';
   }catch(e){ PG_INV.st=null; console.warn('flat stock',e); return; }
@@ -332,6 +346,7 @@ function pgInvRefresh(keep){
   const dd=$('pgFlatDD'), inp=$('pgFlat'); if(!dd||!inp) return;
   const x=pgInvFor();
   PG.ddOpen=false; PG.ddQ='';
+  if(!keep) pgBhkLock(false);
   if(!x){ if(PG.invMode){ PG.invMode=false; PG.flFilter=null; pgFloorPlain(PG.project); } dd.style.display='none'; inp.style.display=''; return; }
   const prevFloor=($('pgFloor')||{}).value, code=keep?String(inp.value||'').trim().toUpperCase():'';
   const cur=code?x.flats.filter(function(f){ return f.code===code; })[0]:null;
@@ -377,8 +392,19 @@ window.pgInvPick=function(v){
   if(f&&f.floor!=null){ const e=$('pgFloor'), s=String(f.floor);   // the flat sets the Floor (the menu keeps showing what it showed)
     if(e&&e.tagName==='SELECT') e.value=s; else if(e){ e.value=s; e.parentNode.querySelectorAll('.pg-seg button').forEach(function(b){ b.classList.toggle('on',b.textContent.trim()===s); }); } }
   const er=$('pgE_pgFlat'), fb=$('pgF_pgFlat'); if(er) er.textContent=''; if(fb&&fb.classList) fb.classList.remove('bad');
+  pgFlatAuto(f);
   pgDDDraw();
 };
+/* WHAT THE FLAT'S RECORD GIVES (20 Nov 2026, Ayush: "there must be a record of which flat is which BHK - BHK is chosen automatically and cannot be set; SBA too if possible"): a flat with a BHK in the
+   stock list sets the Bedrooms and locks them ("from the flat's record"); its area fills Super built-up area (still editable). A flat with no BHK on record leaves Bedrooms free. */
+function pgBhkLock(on,why){ const w=$('pgC_pgBhk'); if(!w) return; const sg=w.querySelector('.pg-seg'); if(sg) sg.classList.toggle('pg-lock',!!on); let n=w.querySelector('.pg-auto'); if(on){ if(!n){ n=document.createElement('div'); n.className='pg-auto'; w.appendChild(n); } n.textContent=why||'Set from the flat record'; } else if(n) n.remove(); }
+function pgFlatAuto(f){
+  if(!f){ pgBhkLock(false); return; }
+  if(f.bhk){ const h=$('pgBhk'), w=$('pgC_pgBhk'); if(h&&w){ let b=[].slice.call(w.querySelectorAll('.pg-seg button')).filter(function(x){ return x.textContent.trim()===f.bhk; })[0];
+      if(!b){ const bt=document.createElement('button'); bt.type='button'; bt.textContent=f.bhk; bt.setAttribute('onclick',"pgSeg(this,'pgBhk')"); w.querySelector('.pg-seg').appendChild(bt); b=bt; }
+      w.querySelectorAll('.pg-seg button').forEach(function(x){ x.classList.toggle('on',x===b); }); h.value=f.bhk; } pgBhkLock(true,'Set from the flat record'); } else pgBhkLock(false);
+  if(f.sba&&$('pgSba')) $('pgSba').value=String(Math.round(f.sba*100)/100);
+}
 window.pgProjChange=function(){ const k=($('pgProject')||{}).value, p=(PG_PROJ.list||[]).filter(x=>x.key===k)[0]; if(p) pgProjApply(p); };
 async function pgProjInit(editRow){
   const seq=PG.openSeq, sel=$('pgProject');
@@ -526,7 +552,7 @@ window.pgClose=function(){ const p=document.getElementById('pgPage'); if(p) p.re
 window.pgSeg=function(btn,id){ btn.parentNode.querySelectorAll('button').forEach(function(x){ x.classList.remove('on'); }); btn.classList.add('on'); $(id).value=btn.textContent.trim(); if(id==='pgBlock') pgInvRefresh(); else if(id==='pgFloor') pgInvFloor(); };
 window.pgNameSync=function(){ const c=$('pgContact'); if(c&&!c.dataset.touched) c.value=($('pgName').value||''); };
 window.pgNatSync=function(){ const n=PDF_COUNTRIES.filter(c=>c[0]===$('pgNat').value)[0]; if(n&&$('pgCc')) $('pgCc').value=n[1]; };
-window.pgMoney=function(inp){ const d=inp.value.replace(/[^\d]/g,''); inp.value=d?Number(d).toLocaleString('en-IN'):''; const h=$('pgH_'+inp.id); if(h) h.textContent=pdfWords(d); };
+window.pgMoney=function(inp){ if(inp.id==='pgBook') inp.dataset.touched=1; const d=inp.value.replace(/[^\d]/g,''); inp.value=d?Number(d).toLocaleString('en-IN'):''; const h=$('pgH_'+inp.id); if(h) h.textContent=pdfWords(d); };
 // Editing a link: its details go back into the boxes.
 // The boxes as they are now (a draft keeps them exactly like this, even half empty).
 function pgRaw(){ const g=id=>($(id)||{}).value||''; const c=$('pgContact');

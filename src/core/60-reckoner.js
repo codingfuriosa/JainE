@@ -176,244 +176,21 @@ async function rkDetail(id,force){
 function rkFv(){ if(RK.fv) return Promise.resolve(RK.fv);
   return sb.schema('cust').from('projects').select('id,name').order('name').then(function(r){ RK.fv=r.data||[]; return RK.fv; },function(){ RK.fv=[]; return RK.fv; }); }
 
-/* ---------------------------------------------------------------- the page */
-function rkNav(on){
-  const items=[['','Directory','fa-building'],['compare','Compare','fa-scale-balanced'],['pending','Pending Verifications','fa-clipboard-check'],['audit','Audit Log','fa-clock-rotate-left']];
-  if(RK.role==='super') items.push(['roles','Roles','fa-user-shield']);
-  return '<div class="rk-nav rk-noprint">'+items.map(function(i){ return '<a class="'+(i[0]===on?'on':'')+'" onclick="navTo(\'reckoner'+(i[0]?'/'+i[0]:'')+'\')"><i class="fa-solid '+i[2]+'"></i> '+i[1]+(i[0]==='pending'&&RK.pendN?'<span class="n">'+RK.pendN+'</span>':'')+'</a>'; }).join('')+'</div>';
-}
-VIEWS.reckoner=async function(v,seg){
-  setCrumb(['Sales','Reckoner']);
-  const head=RK_CSS+mHead('fa-book-bookmark','#0f766e','Reckoner');
-  const s0=seg&&seg[0]||'';
-  try{
-    if(!RK.projects){ v.innerHTML=head+'<div class="loader"><div class="spin"></div></div>'; await rkBase(); if(PAGE!=='reckoner') return; }
-    if(s0==='p'&&seg[1]){
-      const id=seg[1], ti=Math.max(0,Math.min(7,parseInt(seg[2]||'0',10)||0));
-      if(!RK.proj[id]){ v.innerHTML=head+rkNav('')+'<div class="loader"><div class="spin"></div></div>'; await rkDetail(id); if(PAGE!=='reckoner') return; }
-      v.innerHTML=head+rkNav('')+rkProfile(id,ti); return;
-    }
-    if(s0==='compare'){ v.innerHTML=head+rkNav('compare')+'<div class="loader"><div class="spin"></div></div>'; const h=await rkCompareView(); if(PAGE!=='reckoner') return; v.innerHTML=head+rkNav('compare')+h; return; }
-    if(s0==='pending'){ v.innerHTML=head+rkNav('pending')+'<div class="loader"><div class="spin"></div></div>'; const h=await rkPendingView(); if(PAGE!=='reckoner') return; v.innerHTML=head+rkNav('pending')+h; return; }
-    if(s0==='audit'){ v.innerHTML=head+rkNav('audit')+'<div class="loader"><div class="spin"></div></div>'; const h=await rkAuditView(); if(PAGE!=='reckoner') return; v.innerHTML=head+rkNav('audit')+h; return; }
-    if(s0==='roles'){ v.innerHTML=head+rkNav('roles')+'<div class="loader"><div class="spin"></div></div>'; const h=await rkRolesView(); if(PAGE!=='reckoner') return; v.innerHTML=head+rkNav('roles')+h; return; }
-    v.innerHTML=head+rkNav('')+rkDirectory();
-  }catch(e){
-    const t=rkErrText(e);
-    v.innerHTML=head+'<div class="card card-pad" style="font-size:13.5px;'+(t==='setup'?'color:#475569':'color:#b91c1c')+'">'
-      +(t==='setup'?'<i class="fa-regular fa-clock"></i> Reckoner\'s database is being set up tonight after 8 PM. The page works once that has run.'
-        :'<i class="fa-solid fa-triangle-exclamation"></i> Reckoner could not be shown: '+esc(t)+'. <a href="javascript:void(0)" onclick="rkReload()">Try again</a>')+'</div>';
-    try{ console.error('reckoner',e); }catch(_e){}
-  }
-};
-window.rkReload=function(){ RK.projects=null; RK.proj={}; renderPage(); };
+/* The page itself (project strip + one-page project sheet, 23 Nov 2026): 62-reckoner-sheet.js */
 
-/* ---------------------------------------------------------------- Directory */
-function rkDirectory(){
-  const P=RK.projects||[], f=RK.f, q=RK.q.trim().toLowerCase();
-  const uniq=function(a){ return Array.from(new Set(a.filter(Boolean))).sort(); };
-  const cats=uniq(P.map(function(p){ return p.category; })), sts=uniq(P.map(function(p){ return p.status; })), cities=uniq(P.map(function(p){ return p.city; }));
-  const cfgNames=uniq(RK.cfg.map(function(c){ const m=String(c.name||'').match(/\d+(\.\d+)?\s*(BHK|RK)|Studio|Bungalow|Villa|Shop|Duplex|Penthouse/i); return m?m[0].toUpperCase().replace(/\s+/,' '):null; }));
-  const cfgOf=function(id){ return RK.cfg.filter(function(c){ return c.project_id===id; }); };
-  const list=P.filter(function(p){
-    if(f.cat&&p.category!==f.cat) return false; if(f.status&&p.status!==f.status) return false; if(f.city&&p.city!==f.city) return false;
-    const cs=cfgOf(p.id);
-    if(f.cfg&&!cs.some(function(c){ return String(c.name||'').toUpperCase().replace(/\s+/g,' ').indexOf(f.cfg)!==-1; })) return false;
-    if(q){ const hay=[p.name,p.code,p.city,p.locality,p.developer,p.rera_no,p.category,p.status,p.stage].concat(cs.map(function(c){ return c.name; })).join(' ').toLowerCase(); if(hay.indexOf(q)===-1) return false; }
-    return true;
-  });
-  const opt=function(v,arr,lbl){ return '<select onchange="rkF(\''+v+'\',this.value)"><option value="">'+lbl+'</option>'+arr.map(function(x){ return '<option'+(f[v]===x?' selected':'')+'>'+esc(x)+'</option>'; }).join('')+'</select>'; };
-  let h='<div class="rk-bar rk-noprint"><input type="search" placeholder="Search project, locality, configuration, RERA..." value="'+esc(RK.q)+'" oninput="rkQ(this.value)" id="rkQ">'
-    +opt('cat',cats,'All categories')+opt('status',sts,'All statuses')+opt('city',cities,'All cities')+opt('cfg',cfgNames,'Any configuration')
-    +(RK.cmp.length?'<button class="btn btn-primary btn-sm" onclick="navTo(\'reckoner/compare\')"><i class="fa-solid fa-scale-balanced"></i> Compare '+RK.cmp.length+'</button>':'')
-    +(rkCanPropose(null)?'<button class="btn btn-sm" onclick="rkEdit(\'projects\',null,null)"><i class="fa-solid fa-plus"></i> Add project</button>':'')+'</div>';
-  if(!P.length) return h+'<div class="rk-sec rk-empty">No projects yet.'+(rkCanPropose(null)?' Use <b>Add project</b>; it appears here once an approver accepts it.':'')+'<br>The workbook data is added after it has been reviewed.</div>';
-  if(!list.length) return h+'<div class="rk-sec rk-empty">No project matches these filters.</div>';
-  return h+'<div class="rk-grid">'+list.map(function(p){
-    const s=RK.stats[p.id]||{n:{}}, cs=cfgOf(p.id), pc=rkComplete(p);
-    const rates=RK.rates.filter(function(r){ return r.project_id===p.id&&r.kind==='base_rate'&&r.unit==='per_sqft'&&r.amount!=null&&!r.internal; });
-    const minRate=rates.length?Math.min.apply(null,rates.map(function(r){ return Number(r.amount); })):null;
-    return '<div class="rk-card" onclick="navTo(\'reckoner/p/'+p.id+'\')">'
-      +'<label class="cmp rk-noprint" onclick="event.stopPropagation()"><input type="checkbox" '+(RK.cmp.indexOf(p.id)!==-1?'checked':'')+' onchange="rkCmpToggle(\''+p.id+'\',this.checked)"> Compare</label>'
-      +'<h3>'+esc(p.name)+'</h3><div class="loc"><i class="fa-solid fa-location-dot"></i> '+(esc([p.locality,p.city].filter(Boolean).join(', '))||'Location not available')+'</div>'
-      +'<div class="rk-chips">'+[p.category,p.status,p.stage].filter(Boolean).map(function(x){ return '<span class="rk-chip">'+esc(x)+'</span>'; }).join('')+' '+rkChip(p,true)+'</div>'
-      +'<div class="rk-meta"><div>Possession: <b>'+(p.possession_date?esc(fmtDate(p.possession_date)):(p.possession_note?esc(p.possession_note):'—'))+'</b></div>'
-      +'<div>Base rate from: <b>'+(minRate!=null?rkInr(minRate)+'/sq ft':'—')+'</b></div>'
-      +'<div>Configurations: <b>'+(cs.length?esc(cs.slice(0,4).map(function(c){ return c.name; }).join(', '))+(cs.length>4?' +'+(cs.length-4):''):'—')+'</b></div>'
-      +'<div>Updated: <b>'+(s.last?esc(fmtDate(s.last)):'—')+'</b></div></div>'
-      +'<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#64748b"><div class="rk-prog" style="flex:1"><i style="width:'+pc+'%"></i></div>'+pc+'% filled</div>'
-      +'</div>';
-  }).join('')+'</div>';
-}
-window.rkF=function(k,v){ RK.f[k]=v; renderPage(); };
-let RK_QT=null;
-window.rkQ=function(v){ RK.q=v; clearTimeout(RK_QT); RK_QT=setTimeout(function(){ renderPage(); setTimeout(function(){ const i=$('rkQ'); if(i){ i.focus(); i.setSelectionRange(i.value.length,i.value.length); } },0); },250); };
-window.rkCmpToggle=function(id,on){ const i=RK.cmp.indexOf(id); if(on&&i===-1){ if(RK.cmp.length>=4){ toast('Compare up to 4 projects','warn'); renderPage(); return; } RK.cmp.push(id); } if(!on&&i!==-1) RK.cmp.splice(i,1); renderPage(); };
-
-/* ---------------------------------------------------------------- Profile */
 const RK_KEY={locations:'loc',configurations:'cfg',charges:'chg',payment_plans:'plan',offers:'off',units:'units',amenities:'am',landmarks:'lm',sales_notes:'notes',bank_approvals:'bank',documents:'docs',assignments:'team'};
-function rkSec(title,icon,tbl,pid,body,extraBtns){
-  if(tbl&&pid&&rkCanApprove()&&RK.proj[pid]){ const un=(RK.proj[pid][RK_KEY[tbl]]||[]).filter(function(x){ return rkState(x)==='pending'; });
-    if(un.length) extraBtns=(extraBtns||'')+'<button class="btn btn-sm" style="color:#166534" onclick="rkVerifyAll(\''+tbl+'\',\''+pid+'\')"><i class="fa-solid fa-check-double"></i> Verify all ('+un.length+')</button>'; }
-  return '<div class="rk-sec"><h4><i class="fa-solid '+icon+'" style="color:#0f766e"></i> '+title+'<span class="r rk-noprint">'+(extraBtns||'')
-    +(tbl&&rkCanPropose(pid)?'<button class="btn btn-sm" onclick="rkEdit(\''+tbl+'\',null,\''+pid+'\')"><i class="fa-solid fa-plus"></i> Add</button>':'')+'</span></h4>'+body+'</div>';
-}
 function rkRowBtns(tbl,r,pid){
   const vb=rkCanApprove()&&rkState(r)!=='verified'?'<button class="rk-ib" title="Mark verified" style="color:#16a34a" onclick="event.stopPropagation();rkVerify(\''+tbl+'\',[\''+r.id+'\'],\''+pid+'\')"><i class="fa-solid fa-check-double"></i></button>':'';
   if(!rkCanPropose(pid)) return vb?'<span class="rk-noprint" style="white-space:nowrap">'+vb+'</span>':'';
   return '<span class="rk-noprint" style="white-space:nowrap">'+vb+'<button class="rk-ib" title="Propose a change" onclick="event.stopPropagation();rkEdit(\''+tbl+'\',\''+r.id+'\',\''+pid+'\')"><i class="fa-solid fa-pen"></i></button>'
     +'<button class="rk-ib" title="Propose removal" onclick="event.stopPropagation();rkArchive(\''+tbl+'\',\''+r.id+'\',\''+pid+'\')"><i class="fa-solid fa-box-archive"></i></button></span>'; }
 function rkVal(v,fmt){ if(v==null||v==='') return rkNA(); return fmt?fmt(v):esc(String(v)); }
-function rkProfile(id,ti){
-  const d=RK.proj[id], p=d.p;
-  let h='<div class="rk-ph"><a class="rk-ib rk-noprint" onclick="navTo(\'reckoner\')"><i class="fa-solid fa-arrow-left"></i> Directory</a></div>'
-    +'<div class="rk-ph"><h2>'+esc(p.name)+'</h2>'+rkChip(p,true)+rkChgChip(d,p.id)
-    +'<span style="margin-left:auto;display:flex;gap:8px;align-items:center" class="rk-noprint">'
-    +'<label style="font-size:12.5px;color:#475569;display:flex;gap:5px;align-items:center" title="Show only verified, in-date, customer-facing information"><input type="checkbox" '+(RK.cust?'checked':'')+' onchange="RK.cust=this.checked;renderPage()"> Customer view</label>'
-    +'<button class="btn btn-sm" onclick="rkRefresh(\''+id+'\')" title="Load again"><i class="fa-solid fa-rotate"></i></button>'
-    +'<button class="btn btn-sm" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button></span></div>'
-    +'<div style="color:#64748b;font-size:13px">'+esc([p.locality,p.city].filter(Boolean).join(', '))+(p.category?' · '+esc(p.category):'')+(p.status?' · '+esc(p.status):'')+'</div>'
-    +(RK.cust?'<div class="rk-pend" style="background:#f0fdf4;border-color:#86efac;color:#166534"><i class="fa-solid fa-eye"></i> Customer view: only verified, in-date, customer-facing information is shown.</div>':'')
-    +'<div class="rk-tabs rk-noprint">'+RK_TABS.map(function(t,i){ return '<a class="'+(i===ti?'on':'')+'" onclick="navTo(\'reckoner/p/'+id+'/'+i+'\')">'+t+'</a>'; }).join('')+'</div>';
-  const body=[rkTabOverview,rkTabConfig,rkTabPricing,rkTabInventory,rkTabAmenities,rkTabLocation,rkTabSales,rkTabDocs][ti](d,id);
-  return h+body;
-}
 window.rkRefresh=async function(id){ try{ await rkDetail(id,true); await rkBase(true); }catch(e){ toast(String(e.message||e),'err'); } renderPage(); };
-
-function rkTabOverview(d,id){
-  const p=d.p, ok=!RK.cust||rkOk(p);
-  const f=function(lbl,v,fmt,copy){ return '<div><div class="k">'+lbl+'</div>'+(ok?rkVal(v,fmt):'<span class="rk-na">Pending Verification</span>')+(ok&&copy?rkCopyBtn(v):'')+'</div>'; };
-  let kv='<div class="rk-kv">'+f('Category',p.category)+f('Project status',p.status)+f('Development stage',p.stage)+f('City',p.city)+f('Locality',p.locality)+f('Developer',p.developer)
-    +f('Land area',p.land_area)+f('Towers / blocks',p.towers)+f('Height',p.height)+f('Total units',p.total_units,rkNum)+f('Open space',p.open_space)
-    +f('Launch date',p.launch_date,fmtDate)+f('Possession',p.possession_date,fmtDate)+f('Possession note',p.possession_note)+f('RERA number',p.rera_no,null,true)+f('RERA note',p.rera_note)
-    +(!RK.cust?f('Farvision project',(p.fv_project_ids||[]).length?p.fv_project_ids.map(function(i){ return ((RK.fv||[]).find(function(x){ return String(x.id)===String(i); })||{name:'#'+i}).name; }).join(', '):null):'')+'</div>'
-    +(p.description&&ok?'<div style="margin-top:12px;font-size:13.5px;line-height:1.55;white-space:pre-wrap">'+esc(p.description)+'</div>':'')
-    +'<div style="margin-top:12px;font-size:12px;color:#64748b">'+(p.source?'Source: '+esc(p.source)+' · ':'')+(p.verified_at?'Verified by '+esc(p.verified_by||'')+' on '+esc(fmtDate(p.verified_at))+' · ':'')+'Updated '+esc(fmtDate(p.updated_at))+(p.valid_until?' · Valid until '+esc(fmtDate(p.valid_until)):'')+'</div>';
-  const edit=(rkCanApprove()&&rkState(p)!=='verified'?'<button class="btn btn-sm" style="color:#166534" onclick="rkVerify(\'projects\',[\''+id+'\'],\''+id+'\')"><i class="fa-solid fa-check-double"></i> Mark overview verified</button> ':'')+(rkCanPropose(id)?'<button class="btn btn-sm" onclick="rkEdit(\'projects\',\''+id+'\',\''+id+'\')"><i class="fa-solid fa-pen"></i> Propose change</button>':'');
-  let h=rkSec('Overview','fa-circle-info',null,id,kv,edit);
-  const off=rkShow(d.off);
-  if(!RK.cust||off.length) h+=rkSec('Offers','fa-tag','offers',id,(off.length?'<table class="rk-t"><tr><th>Offer</th><th>Details</th><th>Valid</th><th></th><th></th></tr>'+off.map(function(o){ return '<tr'+(o.internal?' class="int"':'')+'><td><b>'+esc(o.title)+'</b>'+rkInt(o)+'</td><td>'+rkVal(o.details)+'</td><td>'+(o.valid_until?'until '+esc(fmtDate(o.valid_until)):'—')+'</td><td>'+rkChip(o)+rkChgChip(d,o.id)+'</td><td>'+rkRowBtns('offers',o,id)+'</td></tr>'; }).join('')+'</table>':'<div class="rk-empty">No offers recorded.</div>')+rkNewPend(d,'offers'));
-  if(!RK.cust) h+=rkSec('Team','fa-users','assignments',id,(d.team.length?'<table class="rk-t"><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr>'+d.team.map(function(a){ return '<tr><td>'+rkVal(a.name)+'</td><td>'+esc(a.email||'')+'</td><td>'+esc(String(a.role||'').replace(/_/g,' '))+'</td><td>'+rkRowBtns('assignments',a,id)+'</td></tr>'; }).join('')+'</table>':'<div class="rk-empty">No project manager or sales executive assigned yet.</div>')+rkNewPend(d,'assignments'));
-  return h;
-}
-function rkTabConfig(d,id){
-  const rows=rkShow(d.cfg);
-  const body=rows.length?'<div class="rk-wrap"><table class="rk-t"><tr><th>Configuration</th><th>Type</th><th>Bed / Bath / Balcony</th><th>Super built-up</th><th>Built-up</th><th>Carpet</th><th>Floors</th><th>Facing</th><th></th><th></th></tr>'
-    +rows.map(function(c){ return '<tr><td><b>'+esc(c.name)+'</b>'+(c.area_note?'<div style="color:#64748b;font-size:12px">'+esc(c.area_note)+'</div>':'')+(c.room_sizes?'<div style="font-size:12px;white-space:pre-wrap">'+esc(c.room_sizes)+'</div>':'')+(c.features?'<div style="font-size:12px;color:#475569;white-space:pre-wrap">'+esc(c.features)+'</div>':'')+'</td>'
-      +'<td>'+rkVal(c.kind)+'</td><td>'+[c.bedrooms,c.bathrooms,c.balconies].map(function(x){ return x==null?'–':rkNum(x); }).join(' / ')+'</td><td>'+(rkArea(c)||rkNA())+'</td><td>'+rkVal(c.built_up,function(x){ return rkNum(x)+' sq ft'; })+'</td><td>'+rkVal(c.carpet,function(x){ return rkNum(x)+' sq ft'; })+'</td>'
-      +'<td>'+rkVal(c.floors)+'</td><td>'+rkVal(c.facing)+'</td><td>'+rkChip(c)+rkChgChip(d,c.id)+'</td><td>'+rkRowBtns('configurations',c,id)+'</td></tr>'; }).join('')+'</table></div>'
-    :'<div class="rk-empty">'+(RK.cust&&d.cfg.length?'Configurations are pending verification.':'No configurations recorded.')+'</div>';
-  return rkSec('Configurations','fa-house','configurations',id,body+rkNewPend(d,'configurations'));
-}
-function rkTabPricing(d,id){
-  const ch=rkShow(d.chg), cfgName=function(cid){ const c=d.cfg.find(function(x){ return x.id===cid; }); return c?c.name:'All configurations'; };
-  const fmtAmt=function(c){ if(c.amount==null) return rkNA(); if(c.unit==='percent') return rkNum(c.amount)+'%'; return rkInr(c.amount)+(c.unit==='per_sqft'?' / sq ft':''); };
-  const yn=function(v){ return v==null?'<span class="rk-na">–</span>':v?'Yes':'No'; };
-  const groups={}; ch.forEach(function(c){ const k=c.configuration_id||''; (groups[k]=groups[k]||[]).push(c); });
-  let body=ch.length?Object.keys(groups).sort(function(a,b){ return a===''?-1:b===''?1:cfgName(a).localeCompare(cfgName(b)); }).map(function(k){
-    return '<div style="font-weight:600;font-size:13px;margin:10px 0 4px">'+esc(cfgName(k||null))+'</div><div class="rk-wrap"><table class="rk-t"><tr><th>Component</th><th>Amount</th><th>In base</th><th>In final</th><th>GST incl.</th><th>Confirmed</th><th>Valid</th><th></th><th></th></tr>'
-      +groups[k].map(function(c){ return '<tr'+(c.internal?' class="int"':'')+'><td><b>'+esc(c.name)+'</b> <span style="color:#64748b;font-size:12px">'+esc(RK_CHARGE_KIND[c.kind]||c.kind)+'</span>'+rkInt(c)+(c.note?'<div style="font-size:12px;color:#475569">'+esc(c.note)+'</div>':'')+'</td>'
-        +'<td style="white-space:nowrap">'+fmtAmt(c)+'</td><td>'+yn(c.in_base)+'</td><td>'+yn(c.in_final)+'</td><td>'+yn(c.gst_included)+'</td><td>'+(c.confirmed?'Confirmed':'<span style="color:#b45309">Indicative</span>')+'</td>'
-        +'<td style="white-space:nowrap">'+(c.effective_from?esc(fmtDate(c.effective_from)):'')+(c.valid_until?' – '+esc(fmtDate(c.valid_until)):'')+'</td><td>'+rkChip(c)+rkChgChip(d,c.id)+'</td><td>'+rkRowBtns('charges',c,id)+'</td></tr>'; }).join('')+'</table></div>';
-  }).join(''):'<div class="rk-empty">'+(RK.cust&&d.chg.length?'Prices are pending verification.':'No price components recorded.')+'</div>';
-  let h=rkSec('Price breakdown','fa-indian-rupee-sign','charges',id,body+rkNewPend(d,'charges'));
-  h+=rkSec('Price calculator','fa-calculator',null,id,rkCalc(d));
-  const plan=rkShow(d.plan);
-  h+=rkSec('Payment plan','fa-list-ol','payment_plans',id,(plan.length?'<table class="rk-t"><tr><th>Stage</th><th>Percent</th><th>Amount</th><th>Note</th><th></th><th></th></tr>'+plan.map(function(s){ return '<tr><td>'+esc(s.stage)+'</td><td>'+(s.percent!=null?rkNum(s.percent)+'%':'—')+'</td><td>'+(s.amount!=null?rkInr(s.amount):'—')+'</td><td>'+esc(s.note||'')+'</td><td>'+rkChip(s)+rkChgChip(d,s.id)+'</td><td>'+rkRowBtns('payment_plans',s,id)+'</td></tr>'; }).join('')+'</table>':'<div class="rk-empty">No payment plan recorded.</div>')+rkNewPend(d,'payment_plans'));
-  return h;
-}
-/* The total is worked out only from what is recorded: per-sq-ft components x the area, lump sums as they are,
-   percentages of the base. Anything unverified or indicative makes the total "Indicative"; nothing missing is
-   counted as 0 - with no base rate or unit price there is no total. */
-const RK_CALC={};
-function rkCalc(d){
-  const pid=d.p.id, st=RK_CALC[pid]=RK_CALC[pid]||{cfg:'',area:''};
-  const cfgs=rkShow(d.cfg); if(!st.cfg&&cfgs.length) st.cfg=cfgs[0].id;
-  const c=cfgs.find(function(x){ return x.id===st.cfg; });
-  const area=st.area!==''?Number(st.area):(c&&(c.sba_min!=null?Number(c.sba_min):c.sba_max!=null?Number(c.sba_max):null));
-  const parts=rkShow(d.chg).filter(function(x){ return (!x.configuration_id||x.configuration_id===st.cfg)&&x.amount!=null&&!(x.in_base&&x.kind!=='base_rate'&&x.kind!=='unit_price'); });
-  let base=0, hasBase=false, lines=[], tentative=false, needArea=false;
-  parts.filter(function(x){ return x.kind==='base_rate'||x.kind==='unit_price'; }).forEach(function(x){
-    let v=null; if(x.unit==='per_sqft'){ if(area==null||!isFinite(area)){ needArea=true; return; } v=Number(x.amount)*area; } else if(x.unit!=='percent') v=Number(x.amount);
-    if(v==null) return; base+=v; hasBase=true; lines.push([x,v]); if(!rkOk(x)||!x.confirmed) tentative=true; });
-  let total=base;
-  parts.filter(function(x){ return x.kind!=='base_rate'&&x.kind!=='unit_price'; }).forEach(function(x){
-    let v=null; if(x.unit==='percent') v=hasBase?base*Number(x.amount)/100:null; else if(x.unit==='per_sqft'){ if(area==null||!isFinite(area)){ needArea=true; return; } v=Number(x.amount)*area; } else v=Number(x.amount);
-    if(v==null) return; total+=v; lines.push([x,v]); if(!rkOk(x)||!x.confirmed) tentative=true; });
-  let h='<div class="rk-bar"><select onchange="RK_CALC[\''+pid+'\'].cfg=this.value;RK_CALC[\''+pid+'\'].area=\'\';renderPage()">'+(cfgs.length?cfgs.map(function(x){ return '<option value="'+x.id+'"'+(x.id===st.cfg?' selected':'')+'>'+esc(x.name)+'</option>'; }).join(''):'<option>No configuration</option>')+'</select>'
-    +'<input type="number" placeholder="Area (sq ft)" style="width:150px" value="'+(area!=null&&isFinite(area)?area:'')+'" onchange="RK_CALC[\''+pid+'\'].area=this.value;renderPage()"> <span style="font-size:12px;color:#64748b">sq ft</span></div>';
-  if(!hasBase) return h+'<div class="rk-empty">'+(needArea?'Enter the area to work out a price.':'Not enough information to total: no base rate or unit price is recorded'+(RK.cust?' and verified':'')+' for this configuration.')+'</div>';
-  h+='<table class="rk-t">'+lines.map(function(l){ const x=l[0]; return '<tr><td>'+esc(x.name)+rkInt(x)+'</td><td style="color:#64748b;font-size:12px">'+(x.unit==='per_sqft'?rkInr(x.amount)+' × '+rkNum(area)+' sq ft':x.unit==='percent'?rkNum(x.amount)+'% of base':'')+'</td><td style="text-align:right;white-space:nowrap">'+rkInr(l[1])+'</td><td>'+rkChip(x)+'</td></tr>'; }).join('')
-    +'<tr><td colspan="2"><b>Total</b> '+(tentative?'<span class="rk-vs pending">Indicative</span>':'<span class="rk-vs verified">All components verified and confirmed</span>')+'</td><td style="text-align:right" class="rk-tot">'+rkInr(total)+'</td><td>'+rkCopyBtn(rkInr(total))+'</td></tr></table>'
-    +(needArea?'<div class="rk-pend">Some per-sq-ft components were left out because no area is set.</div>':'')
-    +'<div style="font-size:12px;color:#64748b;margin-top:8px">Components marked "included in base" are not added again. Missing components are not counted.</div>';
-  return h;
-}
-function rkTabInventory(d,id){
-  const f=RK.inv, all=rkShow(d.units), uniq=function(a){ return Array.from(new Set(a.filter(Boolean))).sort(); };
-  const cfgName=function(cid){ const c=d.cfg.find(function(x){ return x.id===cid; }); return c?c.name:''; };
-  const rows=all.filter(function(u){ if(f.tower&&u.tower!==f.tower) return false; if(f.cfg&&u.configuration_id!==f.cfg) return false; if(f.status&&u.status!==f.status) return false;
-    if(f.q){ const q=f.q.toLowerCase(); if([u.unit_no,u.tower,u.floor,u.facing,u.view,cfgName(u.configuration_id)].join(' ').toLowerCase().indexOf(q)===-1) return false; } return true; });
-  const last=all.reduce(function(m,u){ return u.updated_at>m?u.updated_at:m; },'');
-  window._rkInvRows=rows.map(function(u){ return Object.assign({},u,{configuration:cfgName(u.configuration_id)}); });
-  const bar='<div class="rk-bar rk-noprint"><input type="search" placeholder="Unit, tower, floor..." value="'+esc(f.q)+'" onchange="RK.inv.q=this.value;renderPage()">'
-    +'<select onchange="RK.inv.tower=this.value;renderPage()"><option value="">All towers</option>'+uniq(all.map(function(u){ return u.tower; })).map(function(t){ return '<option'+(f.tower===t?' selected':'')+'>'+esc(t)+'</option>'; }).join('')+'</select>'
-    +'<select onchange="RK.inv.cfg=this.value;renderPage()"><option value="">All configurations</option>'+d.cfg.map(function(c){ return '<option value="'+c.id+'"'+(f.cfg===c.id?' selected':'')+'>'+esc(c.name)+'</option>'; }).join('')+'</select>'
-    +'<select onchange="RK.inv.status=this.value;renderPage()"><option value="">Any status</option>'+['Available','On Hold','Under Verification'].map(function(s){ return '<option'+(f.status===s?' selected':'')+'>'+s+'</option>'; }).join('')+'</select>'
-    +'<button class="btn btn-sm" onclick="rkInvExport(\''+id+'\')"><i class="fa-solid fa-file-excel"></i> Export</button>'
-    +(rkCanPropose(id)?'<button class="btn btn-sm" onclick="rkInvImportAsk(\''+id+'\')"><i class="fa-solid fa-file-import"></i> Import Excel</button>':'')+'</div>';
-  const body=rows.length?'<div class="rk-wrap"><table class="rk-t"><tr><th>Unit</th><th>Tower</th><th>Floor</th><th>Configuration</th><th>Area</th><th>Facing / view</th><th>Base price</th><th>Quoted price</th><th>Status</th><th></th><th></th></tr>'
-    +rows.map(function(u){ return '<tr><td><b>'+esc(u.unit_no)+'</b></td><td>'+rkVal(u.tower)+'</td><td>'+rkVal(u.floor)+'</td><td>'+rkVal(cfgName(u.configuration_id))+'</td><td>'+rkVal(u.area,function(x){ return rkNum(x)+' sq ft'; })+'</td>'
-      +'<td>'+esc([u.facing,u.view].filter(Boolean).join(' / ')||'—')+'</td><td>'+rkVal(u.base_price,rkInr)+'</td><td>'+rkVal(u.quoted_price,rkInr)+'</td><td>'+esc(u.status)+(u.note?'<div style="font-size:12px;color:#64748b">'+esc(u.note)+'</div>':'')+'</td>'
-      +'<td>'+rkChip(u)+rkChgChip(d,u.id)+'</td><td>'+rkRowBtns('units',u,id)+'</td></tr>'; }).join('')+'</table></div>'
-    :'<div class="rk-empty">'+(all.length?'No unit matches these filters.':'No free units recorded.')+'</div>';
-  return rkSec('Inventory - free units','fa-table-cells','units',id,'<div style="font-size:12.5px;color:#64748b;margin:-4px 0 10px">'+rows.length+' of '+all.length+' free units'+(last?' · last updated '+esc(fmtDate(last)):'')+' · units Farvision shows as booked are hidden'+((d.p.fv_project_ids||[]).length?'':' (this project is not linked to Farvision yet)')+'</div>'+bar+body+rkNewPend(d,'units'));
-}
-function rkTabAmenities(d,id){
-  const rows=rkShow(d.am), g={}; rows.forEach(function(a){ (g[a.category||'Other']=g[a.category||'Other']||[]).push(a); });
-  const order=(RK.lists.amenity||[]).concat(Object.keys(g)).filter(function(k,i,a){ return g[k]&&a.indexOf(k)===i; });
-  const body=rows.length?order.map(function(k){ return '<div style="font-weight:600;font-size:13px;margin:10px 0 6px">'+esc(k)+'</div><table class="rk-t">'+g[k].map(function(a){ return '<tr><td style="width:30%"><b>'+esc(a.name)+'</b></td><td>'+esc(a.description||'')+(a.place?'<div style="font-size:12px;color:#64748b">'+esc(a.place)+'</div>':'')+'</td><td>'+esc(a.status||'')+'</td><td>'+rkChip(a)+rkChgChip(d,a.id)+'</td><td>'+rkRowBtns('amenities',a,id)+'</td></tr>'; }).join('')+'</table>'; }).join('')
-    :'<div class="rk-empty">'+(RK.cust&&d.am.length?'Amenities are pending verification.':'No amenities recorded.')+'</div>';
-  return rkSec('Amenities','fa-person-swimming','amenities',id,body+rkNewPend(d,'amenities'));
-}
-function rkTabLocation(d,id){
-  const loc=rkShow(d.loc);
-  let h=rkSec('Address','fa-location-dot','locations',id,(loc.length?loc.map(function(l){ return '<div style="display:flex;gap:10px;align-items:flex-start;margin:0 0 10px"><div style="flex:1;font-size:13.5px"><div style="white-space:pre-wrap">'+esc(l.address||'')+(l.pin?' - '+esc(l.pin):'')+rkCopyBtn([l.address,l.pin].filter(Boolean).join(' - '))+'</div>'
-      +(l.directions?'<div style="font-size:12.5px;color:#475569;margin-top:4px;white-space:pre-wrap">'+esc(l.directions)+'</div>':'')
-      +((l.maps_url||(l.lat&&l.lng))?'<a href="'+esc(l.maps_url||('https://www.google.com/maps?q='+l.lat+','+l.lng))+'" target="_blank" rel="noopener" style="font-size:13px"><i class="fa-solid fa-map"></i> Open in Google Maps</a>'+rkCopyBtn(l.maps_url||(l.lat+','+l.lng)):'')
-      +'</div>'+rkChip(l)+rkChgChip(d,l.id)+rkRowBtns('locations',l,id)+'</div>'; }).join(''):'<div class="rk-empty">No address recorded.</div>')+rkNewPend(d,'locations'));
-  const lm=rkShow(d.lm), g={}; lm.forEach(function(a){ (g[a.category||'Landmark']=g[a.category||'Landmark']||[]).push(a); });
-  const order=(RK.lists.landmark||[]).concat(Object.keys(g)).filter(function(k,i,a){ return g[k]&&a.indexOf(k)===i; });
-  h+=rkSec('Nearby','fa-signs-post','landmarks',id,(lm.length?'<div class="rk-wrap"><table class="rk-t"><tr><th>Place</th><th>Kind</th><th>Distance</th><th>Travel time</th><th>Checked</th><th></th><th></th></tr>'+order.map(function(k){ return g[k].map(function(a){
-      return '<tr><td><b>'+esc(a.name)+'</b>'+(a.travel_note?'<div style="font-size:12px;color:#64748b">'+esc(a.travel_note)+'</div>':'')+'</td><td>'+esc(k)+'</td><td>'+(a.distance_km!=null?rkNum(a.distance_km)+' km':rkNA())+'</td><td>'+(a.travel_min!=null?rkNum(a.travel_min)+' min':rkNA())+'</td><td>'+(a.verified_at?esc(fmtDate(a.verified_at)):'—')+'</td><td>'+rkChip(a)+rkChgChip(d,a.id)+'</td><td>'+rkRowBtns('landmarks',a,id)+'</td></tr>'; }).join(''); }).join('')+'</table></div>'
-    :'<div class="rk-empty">No nearby places recorded.</div>')+rkNewPend(d,'landmarks'));
-  return h;
-}
-function rkTabSales(d,id){
-  const rows=rkShow(d.notes);
-  const block=function(list,title,cls){ const g={}; list.forEach(function(n){ (g[n.kind]=g[n.kind]||[]).push(n); });
-    return '<div class="rk-sec" style="margin:0'+(cls?';'+cls:'')+'"><h4>'+title+'</h4>'+(list.length?Object.keys(RK_NOTE_KIND).filter(function(k){ return g[k]; }).map(function(k){
-      return '<div style="font-weight:600;font-size:12.5px;color:#475569;margin:10px 0 4px;text-transform:uppercase;letter-spacing:.03em">'+RK_NOTE_KIND[k]+'</div>'+g[k].map(function(n){
-        return '<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid #f1f5f9"><div style="flex:1;font-size:13.5px">'+(n.title?'<b>'+esc(n.title)+'</b><br>':'')+'<span style="white-space:pre-wrap">'+esc(n.body)+'</span>'+rkCopyBtn(n.body)+'</div>'+rkChip(n)+rkChgChip(d,n.id)+rkRowBtns('sales_notes',n,id)+'</div>'; }).join(''); }).join('')
-      :'<div class="rk-empty">Nothing recorded.</div>')+'</div>'; };
-  let h=rkSec('Sales information','fa-bullhorn','sales_notes',id,'<div class="rk-two">'+block(rows.filter(function(n){ return !n.internal; }),'<i class="fa-solid fa-user" style="color:#16a34a"></i> Customer-facing')
-    +(RK.cust?'':block(rows.filter(function(n){ return n.internal; }),'<i class="fa-solid fa-lock" style="color:#7c3aed"></i> Internal - do not share with customers','background:#faf5ff'))+'</div>'+rkNewPend(d,'sales_notes'));
-  const bank=rkShow(d.bank);
-  h+=rkSec('Bank approvals','fa-building-columns','bank_approvals',id,(bank.length?'<table class="rk-t"><tr><th>Bank</th><th>Status</th><th>Reference</th><th></th><th></th></tr>'+bank.map(function(b){ return '<tr><td><b>'+esc(b.bank)+'</b></td><td>'+rkVal(b.status)+'</td><td>'+rkVal(b.reference)+'</td><td>'+rkChip(b)+rkChgChip(d,b.id)+'</td><td>'+rkRowBtns('bank_approvals',b,id)+'</td></tr>'; }).join('')+'</table>':'<div class="rk-empty">No bank approvals recorded.</div>')+rkNewPend(d,'bank_approvals'));
-  return h;
-}
-function rkTabDocs(d,id){
-  const rows=rkShow(d.docs), g={}; rows.forEach(function(x){ (g[x.category]=g[x.category]||[]).push(x); });
-  const order=(RK.lists.document||[]).concat(Object.keys(g)).filter(function(k,i,a){ return g[k]&&a.indexOf(k)===i; });
-  const body=rows.length?'<table class="rk-t"><tr><th>Document</th><th>Category</th><th>Version</th><th>Added</th><th></th><th></th></tr>'+order.map(function(k){ return g[k].map(function(x){
-      return '<tr'+(x.internal?' class="int"':'')+'><td>'+(x.s3_key?'<a href="javascript:void(0)" onclick="rkOpenDoc(\''+id+'\',\''+x.id+'\')"><i class="fa-regular fa-file"></i> '+esc(x.title)+'</a>':esc(x.title)+' <span class="rk-na">(no file)</span>')+rkInt(x)+'</td><td>'+esc(k)+'</td><td>'+esc(x.version||'')+'</td><td>'+esc(fmtDate(x.entered_at))+(x.entered_by?'<div style="font-size:11.5px;color:#64748b">'+esc(x.entered_by)+'</div>':'')+'</td><td>'+rkChip(x)+rkChgChip(d,x.id)+'</td><td>'+rkRowBtns('documents',x,id)+'</td></tr>'; }).join(''); }).join('')+'</table>'
-    :'<div class="rk-empty">No documents uploaded.</div>';
-  return rkSec('Documents','fa-folder-open','documents',id,body+rkNewPend(d,'documents'));
-}
 window.rkOpenDoc=function(pid,did){ const x=(RK.proj[pid].docs||[]).find(function(r){ return r.id===did; }); if(x&&x.s3_key) s3OpenSigned(x.s3_key,x.file_name||x.title); };
 
 /* ---------------------------------------------------------------- proposing a change */
-function rkFields(tbl){ return RK_F[tbl].concat(tbl==='assignments'?[]:RK_COMMON); }
+// 23 Nov 2026: the edit form shows only the record's own fields (Ayush: editing should be easy)
+function rkFields(tbl){ return RK_F[tbl].filter(function(f){ return f[0]!=='sort'; }); }
 function rkRec(tbl,id,pid){ if(tbl==='projects') return (RK.proj[id]&&RK.proj[id].p)||(RK.projects||[]).find(function(p){ return p.id===id; });
   const d=RK.proj[pid]; if(!d) return null; const m={locations:'loc',configurations:'cfg',charges:'chg',payment_plans:'plan',offers:'off',units:'units',amenities:'am',landmarks:'lm',sales_notes:'notes',bank_approvals:'bank',documents:'docs',assignments:'team'};
   return (d[m[tbl]]||[]).find(function(r){ return r.id===id; }); }
@@ -442,12 +219,9 @@ window.rkEdit=async function(tbl,id,pid){
   const r=id?rkRec(tbl,id,pid):null;
   if(id&&!r){ toast('This record is not loaded - refresh the page','err'); return; }
   const pend=id&&pid&&RK.proj[pid]?rkChgFor(RK.proj[pid],id):[];
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> '+(id?'Propose a change - ':'Add ')+esc(RK_TBL_LABEL[tbl])+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body"><div class="rk-pend" style="margin:0 0 12px"><i class="fa-solid fa-shield-halved"></i> Nothing changes until an approver accepts it. Until then the current approved value stays on screen, marked "Change pending".</div>'
-    +(pend.length?'<div class="rk-pend" style="margin:0 0 12px;background:#fffbeb;border-color:#fcd34d;color:#92400e">'+pend.length+' change(s) to this are already waiting for approval.</div>':'')
-    +'<div class="rk-form" id="rkForm">'+rkFields(tbl).map(function(f){ return rkInput(f,r?r[f[0]]:(f[2]==='bool'?false:null),pid); }).join('')
-    +'<hr><label class="w">Reason for this change<input type="text" id="rkReason" placeholder="e.g. new price list from 20 Nov"></label></div></div>'
-    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="rkSave" onclick="rkSave(\''+tbl+'\','+(id?'\''+id+'\'':'null')+','+(pid?'\''+pid+'\'':'null')+')"><i class="fa-solid fa-paper-plane"></i> Send for approval</button></div>','lg');
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> Edit '+esc(RK_TBL_LABEL[tbl]).toLowerCase()+(r&&(r.name||r.title)?' - '+esc(r.name||r.title):'')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body"><div class="rk-form" id="rkForm">'+rkFields(tbl).map(function(f){ return rkInput(f,r?r[f[0]]:(f[2]==='bool'?false:null),pid); }).join('')+'</div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="rkSave" onclick="rkSave(\''+tbl+'\','+(id?'\''+id+'\'':'null')+','+(pid?'\''+pid+'\'':'null')+')"><i class="fa-solid fa-check"></i> Save</button></div>','lg');
 };
 window.rkSave=async function(tbl,id,pid){
   const btn=$('rkSave'), form=$('rkForm'); if(!form) return;
@@ -463,21 +237,23 @@ window.rkSave=async function(tbl,id,pid){
   });
   if(tbl==='documents'&&!id&&!file) missing.push('File');
   if(missing.length){ toast('Please fill: '+missing.join(', '),'warn'); return; }
-  btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Sending...';
+  btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
   try{
     if(file){
       const up=await uploadFileToS3('portal/reckoner/'+(pid||'new')+'/'+s3Stamp()+'_'+s3SafeName(file.name),file);
       if(up.error) throw up.error;
       Object.assign(payload,{s3_key:up.data.path,file_name:file.name,mime:file.type||null,size_bytes:file.size});
     }
-    if(id&&!Object.keys(payload).length){ toast('Nothing was changed','warn'); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send for approval'; return; }
+    if(id&&!Object.keys(payload).length){ toast('Nothing was changed','warn'); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i> Save'; return; }
     if(!id&&tbl!=='projects') payload.project_id=pid;
     const res=await RKS().rpc('propose',{p_tbl:tbl,p_record:id,p_op:id?'update':'insert',p_payload:payload,p_reason:($('rkReason')||{}).value||null,p_source:payload.source||null,p_project:tbl==='projects'?id:pid,p_batch:null});
     if(res.error) throw res.error;
-    closeModal(); toast('Sent for approval','ok'); RK.pendN++;
+    if(rkCanApprove()){ const ok=await RKS().rpc('review',{p_id:res.data,p_approve:true,p_remarks:'Saved by the editor'}); if(ok.error) throw ok.error; toast('Saved','ok'); }
+    else { toast('Sent for approval','ok'); RK.pendN++; }
+    closeModal();
     if(pid) await rkDetail(pid,true);
     renderPage();
-  }catch(e){ toast(String((e&&e.message)||e),'err'); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send for approval'; }
+  }catch(e){ toast(String((e&&e.message)||e),'err'); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i> Save'; }
 };
 window.rkArchive=async function(tbl,id,pid){
   const r=rkRec(tbl,id,pid); if(!r) return;

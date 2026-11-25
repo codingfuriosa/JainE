@@ -649,6 +649,7 @@ async function srcWiseSync(o: any) {
       const s = n.self || {}, tt = n.total || {};
       rows.push({ day: d, bu_id: Number(p.business_unit_id) || 0, business_unit: p.business_unit || '', node_id: Number(n.source_category_id) || 0,
         parent_id: parent, level, top_source: top, source: String(n.source || '').trim(),
+        self_leads: num(s.leads), tot_leads: num(tt.leads),   // leads added to the report by the CRM, 23 Nov 2026
         self_q: num(s.qualified), self_sv: num(s.site_visited), self_rv: num(s.revisited), self_bk: num(s.booked), self_lost: num(s.lost),
         tot_q: num(tt.qualified), tot_sv: num(tt.site_visited), tot_rv: num(tt.revisited), tot_bk: num(tt.booked), tot_lost: num(tt.lost), fetched_at: now });
       for (const c of (n.children || [])) walk(p, c, Number(n.source_category_id) || 0, level + 1, top);
@@ -657,7 +658,16 @@ async function srcWiseSync(o: any) {
     // one node can appear twice under a project (the CRM repeats a source name in two places): keep the first
     const seen = new Set<string>(), uniq = rows.filter((x) => { const k = x.bu_id + '|' + x.node_id; if (seen.has(k)) return false; seen.add(k); return true; });
     const dr = await db.from('crm_source_daily').delete().eq('day', d); if (dr.error) throw new Error('crm_source_daily: ' + dr.error.message);
-    for (let i = 0; i < uniq.length; i += 500) { const ins = await db.from('crm_source_daily').insert(uniq.slice(i, i + 500)); if (ins.error) throw new Error('crm_source_daily: ' + ins.error.message); }
+    /* Until the leads columns exist (added 23 Nov 2026 20:30 IST) the rows go in without them rather than not at all. */
+    let batch = uniq;
+    for (let i = 0; i < batch.length; i += 500) {
+      let ins = await db.from('crm_source_daily').insert(batch.slice(i, i + 500));
+      if (ins.error && /leads/.test(ins.error.message)) {
+        batch = batch.map(({ self_leads, tot_leads, ...rest }: any) => rest);
+        ins = await db.from('crm_source_daily').insert(batch.slice(i, i + 500));
+      }
+      if (ins.error) throw new Error('crm_source_daily: ' + ins.error.message);
+    }
     days++; rowsN += uniq.length;
   }
   return { ok: true, srcwise: true, from, to, days, rows: rowsN, notes };

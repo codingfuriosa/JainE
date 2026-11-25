@@ -16,7 +16,7 @@ let SRC={period:'last_30d',from:'',to:'',bper:'prev',bfrom:'',bto:'',proj:'all',
 const SRC_BOPTS=[['prev','Period before A']].concat(OB_PERIODS);
 const SRC_CSS='<style>'
   +'.src-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 14px}'
-  +'.src-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:0 0 16px}@media(max-width:900px){.src-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}'
+  +'.src-kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin:0 0 16px}@media(max-width:900px){.src-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}'
   +'.src-k{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px}.src-k .l{font-size:11px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.4px}'
   +'.src-k .v{font-size:22px;font-weight:800;margin-top:2px;font-variant-numeric:tabular-nums}.src-k .c{font-size:11.5px;margin-top:2px;color:var(--slate)}'
   +'.src-t{width:100%;border-collapse:collapse;font-size:13px}.src-t th{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--slate);background:#f8fafc;padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}'
@@ -27,7 +27,8 @@ const SRC_CSS='<style>'
   +'.src-cmp{font-size:11px;color:#94a3b8;margin-top:1px}.src-cmp .g{color:#15803d;font-weight:700}.src-cmp .b{color:#b91c1c;font-weight:700}'
   +'.src-h{font-weight:800;font-size:14px;margin:18px 2px 8px}.src-note{font-size:11.5px;color:var(--slate);margin:10px 2px;line-height:1.5}'
   +'</style>';
-const SRC_K=[['q','Qualified',true],['sv','Site visits',true],['rv','Revisits',true],['bk','Booked',true],['lost','Lost',false]];
+// Leads added 23 Nov 2026 (Ayush: "Yes, add Leads") - the CRM report now carries a lead count for every source
+const SRC_K=[['l','Leads',true],['q','Qualified',true],['sv','Site visits',true],['rv','Revisits',true],['bk','Booked',true],['lost','Lost',false]];
 function srcRangeOf(p,f,t){ const keep=OB_P; OB_P=Object.assign({},OB_P,{period:p,from:f,to:t}); try{ return obRange(); } finally{ OB_P=keep; } }
 function srcRange(){ return srcRangeOf(SRC.period,SRC.from,SRC.to); }
 // Range B: its own period or dates, or the same number of days just before A
@@ -52,12 +53,14 @@ window.srcCmp=function(on){ SRC.cmp=on; if(on&&SRC.bper===SRC.period&&SRC.bper!=
 if(!window._srcDoc){ window._srcDoc=true; document.addEventListener('click',function(){ if(SRC.pop){ SRC.pop=null; srcPaint(); } }); }
 async function srcRows(s,e){
   const out=[]; for(let f=0;;f+=1000){
-    const q=await sb.schema('camp').from('crm_source_daily').select('bu_id,business_unit,node_id,parent_id,level,top_source,source,tot_q,tot_sv,tot_rv,tot_bk,tot_lost').gte('day',s).lte('day',e).range(f,f+999);
+    const cols='bu_id,business_unit,node_id,parent_id,level,top_source,source,tot_q,tot_sv,tot_rv,tot_bk,tot_lost';
+    let q=await sb.schema('camp').from('crm_source_daily').select(cols+',tot_leads').gte('day',s).lte('day',e).range(f,f+999);
+    if(q.error&&/tot_leads/.test(q.error.message)) q=await sb.schema('camp').from('crm_source_daily').select(cols).gte('day',s).lte('day',e).range(f,f+999);   // before the leads column exists
     if(q.error) return {error:q.error}; out.push.apply(out,q.data||[]); if(!q.data||q.data.length<1000) break; }
   // the period: each project's node added up over the days
   const by={};
-  out.forEach(function(r){ const k=r.bu_id+'|'+r.node_id; const x=by[k]||(by[k]={bu:r.bu_id,project:r.business_unit,id:r.node_id,parent:r.parent_id,level:r.level,top:r.top_source,name:r.source,q:0,sv:0,rv:0,bk:0,lost:0});
-    x.q+=r.tot_q; x.sv+=r.tot_sv; x.rv+=r.tot_rv; x.bk+=r.tot_bk; x.lost+=r.tot_lost; });
+  out.forEach(function(r){ const k=r.bu_id+'|'+r.node_id; const x=by[k]||(by[k]={bu:r.bu_id,project:r.business_unit,id:r.node_id,parent:r.parent_id,level:r.level,top:r.top_source,name:r.source,l:0,q:0,sv:0,rv:0,bk:0,lost:0});
+    x.l+=r.tot_leads||0; x.q+=r.tot_q; x.sv+=r.tot_sv; x.rv+=r.tot_rv; x.bk+=r.tot_bk; x.lost+=r.tot_lost; });
   return {nodes:by,days:new Set(out.map(function(r){ return r.day; })).size};
 }
 async function srcView(host){
@@ -94,9 +97,9 @@ function srcPaint(err){
   const N=SRC.data.nodes, P=(SRC.prev&&SRC.prev.nodes)||{};
   const inP=function(x){ return SRC.proj==='all'||x.project===SRC.proj; };
   const keys=Object.keys(N).filter(function(k){ return inP(N[k]); });
-  const zero=function(x){ return !(x.q||x.sv||x.rv||x.bk||x.lost); };
+  const zero=function(x){ return !(x.l||x.q||x.sv||x.rv||x.bk||x.lost); };
   const add=function(t,x){ SRC_K.forEach(function(k){ t[k[0]]+=(x&&x[k[0]])||0; }); return t; };
-  const blank=function(){ return {q:0,sv:0,rv:0,bk:0,lost:0}; };
+  const blank=function(){ return {l:0,q:0,sv:0,rv:0,bk:0,lost:0}; };
   const pct=function(a,b){ return b?Math.round(a/b*100)+'%':'—'; };
   const chg=function(now,was,goodUp){ if(!SRC.cmp) return ''; let c=''; if(was){ const p=(now-was)/was*100; c=Math.abs(p)<0.5?'=':'<span class="'+((p>0)===goodUp?'g':'b')+'">'+(p>0?'▲':'▼')+Math.abs(p).toFixed(0)+'%</span>'; } else if(now) c='<span class="'+(goodUp?'g':'b')+'">new</span>';
     return '<div class="src-cmp">'+obNum(was||0)+' '+c+'</div>'; };
@@ -115,7 +118,7 @@ function srcPaint(err){
   const srcNames=Object.keys(bySrc).filter(function(n){ return !zero(bySrc[n]); }).sort(function(a,b){ return bySrc[b].q-bySrc[a].q||bySrc[b].sv-bySrc[a].sv; });
   h+='<div class="src-h"><i class="fa-solid fa-filter"></i> By source <span style="font-weight:500;color:var(--slate);font-size:12px">- '+(SRC.proj==='all'?'all projects':esc(SRC.proj))+'</span></div>'
     +'<div class="card" style="overflow-x:auto"><table class="src-t">'+thead('Source')+'<tbody>'
-    +(srcNames.length?srcNames.map(function(n){ return '<tr><td class="nm"><b>'+esc(n)+'</b></td>'+cells(bySrc[n],bySrcW[n])+'</tr>'; }).join(''):'<tr><td colspan="8" style="text-align:center;color:var(--slate);padding:20px">Nothing in these dates</td></tr>')
+    +(srcNames.length?srcNames.map(function(n){ return '<tr><td class="nm"><b>'+esc(n)+'</b></td>'+cells(bySrc[n],bySrcW[n])+'</tr>'; }).join(''):'<tr><td colspan="9" style="text-align:center;color:var(--slate);padding:20px">Nothing in these dates</td></tr>')
     +'</tbody><tfoot><tr class="tot"><td>Total</td>'+cells(T,TW)+'</tr></tfoot></table></div>';
   // BY PROJECT: project > source > campaign > ad set > ad
   const kids={}; keys.forEach(function(k){ const x=N[k]; const pk=x.parent==null?('p:'+x.bu):(x.bu+'|'+x.parent); (kids[pk]||(kids[pk]=[])).push(k); });
@@ -130,7 +133,7 @@ function srcPaint(err){
     +'<div class="card" style="overflow-x:auto"><table class="src-t">'+thead('Project / source')+'<tbody>'
     +(projIds.length?projIds.map(function(b){ const pk='p:'+b, on=!!SRC.open[pk];
         return '<tr class="op'+(on?' on':'')+'" onclick="srcToggle(\''+pk+'\')"><td class="nm"><span class="car"><i class="fa-solid fa-chevron-'+(on?'down':'right')+'"></i></span><b>'+esc(projT[b].name)+'</b></td>'+cells(projT[b],projW[b])+'</tr>'+(on?rowsOf(pk,1):''); }).join('')
-      :'<tr><td colspan="8" style="text-align:center;color:var(--slate);padding:20px">Nothing in these dates</td></tr>')
+      :'<tr><td colspan="9" style="text-align:center;color:var(--slate);padding:20px">Nothing in these dates</td></tr>')
     +'</tbody></table></div>'
     +'<div class="src-note">From the CRM\'s source report (its absolute figures), all lead sources - not only ads. Read every night; today is not included.'+(SRC.data.days?'':' No days read for these dates yet.')+'</div>';
   body.innerHTML=h;

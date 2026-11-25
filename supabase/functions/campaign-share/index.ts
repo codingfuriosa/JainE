@@ -76,8 +76,19 @@ function ytId(u: any) { const m = String(u || '').match(/ytimg\.com\/vi\/([A-Za-
    open in hierarchy should be similar to how our JainE users see"). The page gets the rows Campaign Analytics itself works
    from - campaigns, ad sets / ad groups, ads per ad set, their status, daily budgets and the CRM's figures at each level -
    and builds the same table. Still only these fields: no account ids, people or anything else. */
-async function summary(period: string) {
-  const p = PERIODS[period] ? period : 'last_30d', r = range(p);
+/* CUSTOM RANGE (25 Nov 2026, Ayush: "In Campaign Analytics' Public Link it does not have Custom selection option"): period
+   'custom' with from / to (YYYY-MM-DD). Only real dates, from on or before to, no later than today (IST), at most 400 days. */
+function customRange(from: unknown, to: unknown) {
+  const ok = (d: unknown) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d + 'T00:00:00Z')) && new Date(d + 'T00:00:00Z').toISOString().slice(0, 10) === d;
+  if (!ok(from) || !ok(to)) return null;
+  const s = String(from), e = String(to), t = ist();
+  if (s > e || e > t || s < '2024-01-01') return null;
+  if ((Date.parse(e) - Date.parse(s)) / 864e5 > 400) return null;
+  return { s, e };
+}
+async function summary(period: string, from?: unknown, to?: unknown) {
+  const cr = period === 'custom' ? customRange(from, to) : null;
+  const p = cr ? 'custom' : PERIODS[period] ? period : 'last_30d', r = cr || range(p);
   const accs = (await db.from('ads_accounts').select('platform,account_id,project').eq('include', true)).data || [];
   const proj: Record<string, string> = {}; for (const a of accs) proj[a.platform + ':' + a.account_id] = a.project || 'Other';
   const ents = await all(() => db.from('ads_entities').select('platform,kind,id,account_id,campaign_id,name,status,objective,daily_budget,thumbnail,body').order('platform').order('kind').order('id'));
@@ -137,7 +148,7 @@ async function summary(period: string) {
   for (const k of Object.keys(crmSet)) if (!sets[k]) delete crmSet[k];
   const projects = [...new Set(accs.map((a: any) => a.project || 'Other'))];
   const hasAcc: Record<string, 1> = {}; for (const a of accs) hasAcc[(a.project || 'Other') + '|' + a.platform] = 1;
-  return { period: p, label: PERIODS[p], from: r.s, to: r.e, at: new Date().toISOString(), projects, hasAcc, camps, sets, adrows, adinfo, crm: Object.values(crmC), crmSet, crmAd };
+  return { period: p, label: PERIODS[p] || 'Custom', from: r.s, to: r.e, at: new Date().toISOString(), projects, hasAcc, camps, sets, adrows, adinfo, crm: Object.values(crmC), crmSet, crmAd };
 }
 
 // a Facebook video ad: Meta's preview of the ad, which plays it (the same as Campaign Analytics' popup)
@@ -172,7 +183,7 @@ Deno.serve(async (req) => {
     const s = await getSettings();
     if (!s.on || !same(String(body.k || ''), String(s.token || ''))) return j({ off: true });
     if (body.action === 'video') { const id = String(body.ad_id || '').replace(/\D/g, ''); if (!id) return j({ video: false }); try { return j(await fbVideo(id)); } catch (_) { return j({ video: false }); } }
-    return j(await summary(String(body.period || 'last_30d')));
+    return j(await summary(String(body.period || 'last_30d'), body.from, body.to));
   } catch (e) {
     return j({ error: 'Something went wrong' }, 500);   // no details to the public
   }

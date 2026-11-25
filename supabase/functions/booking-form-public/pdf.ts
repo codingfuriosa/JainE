@@ -155,7 +155,7 @@ export async function bookingPdf(o: { projectName: string; company: string; ref:
   doc.rows([["Booking amount", money(pay.amount)], ["Paid by", pay.mode], ["Reference", pay.ref], ["Bank / branch", [pay.bank, pay.branch].filter(Boolean).join(", ")], ["Date", dmy(pay.date)],
     ["Payment proof", files.some((f) => f.kind === "payment") ? "Attached" : ""], ["Purpose of booking", d.purpose], ["Booked through", d.sales]]);
   doc.heading("Agreement");
-  doc.text(d.terms_accepted ? "I/We have read and agree to the Terms of application, the Declaration, the Special Conditions and the cost sheet, and confirm that everything in this form is true. Accepted on submission, after verifying the email address with a one-time code." : "Terms not accepted.", { size: 9.5 });
+  doc.text(d.terms_accepted ? "I/We have read and agreed to all the above-stated Terms and Conditions, Declaration and Special Conditions, and hereby expressly agree to the Cost Sheet and the Payment Plan. I/We further acknowledge that the Cost Sheet is subject to change and that the finalised Cost Sheet will be attached to the Agreement. I/We confirm and declare that everything in this form is true and that nothing has been concealed. Accepted on submission, after verifying the email address with a one-time password (OTP)." : "Terms not accepted.", { size: 9.5 });
 
   await addDocs(doc, o.docs || [], o.maxPages);
   // documents that are not drawn here (attached PDFs, large or HEIC photos): named, with where they are
@@ -171,6 +171,20 @@ export async function bookingPdf(o: { projectName: string; company: string; ref:
     doc.text(t, { size: 14, bold: true, gap: 8 });
     doc.numbered(arr, o.company);
   }
+  /* THE LAST WORDS (23 Nov 2026, Ayush: "at the end add a text that tells the whole Terms ... is OTP verified, legally verified"): the closing statement of the document - what was accepted, by whom,
+     when, and that the email address was proved by a one-time password before the form could be submitted. */
+  const when = new Date(o.submittedAt).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }) + " IST";
+  const who = (Array.isArray(d.applicants) ? d.applicants : []).map((a: any) => [a.title, a.full_name].filter(Boolean).join(" ")).filter(Boolean).join(", ");
+  // 23 Nov 2026 (Ayush: "move it a bit towards the bottom"): the block sits at the foot of the last page (about 150 pt above the bottom edge), not straight under the last clause;
+  // if the last clause already reaches that far down, it goes on a page of its own at the foot
+  const FOOT_TOP = 215;
+  if (doc.y < FOOT_TOP + 24) doc.newPage();
+  doc.y = FOOT_TOP;
+  doc.page.drawLine({ start: { x: M, y: FOOT_TOP + 8 }, end: { x: A4[0] - M, y: FOOT_TOP + 8 }, thickness: 0.6, color: LINE });
+  doc.heading("Electronic verification");
+  doc.text(`The Terms of application, the Declaration and the Special Conditions set out above, together with every answer and document in this application (reference ${o.ref}), were read and accepted by ${who || "the applicant(s)"} on ${when}.`, { size: 9.5, gap: 5 });
+  doc.text(`Before this application could be submitted, the applicant's email address (${plain(String((d.contact && d.contact.email) || ""))}) was verified with a one-time password (OTP) sent to it. The whole of the Terms, the Declaration and the Special Conditions is therefore OTP-verified and stands as the applicant's electronic acceptance of this application.`, { size: 9.5, gap: 5 });
+  doc.text(`This is a computer-generated document produced from the answers saved at submission; it needs no signature.`, { size: 9, color: GREY });
   doc.footer();
   return await doc.pdf.save({ useObjectStreams: false });   // no object-stream packing: cheaper in CPU
 }

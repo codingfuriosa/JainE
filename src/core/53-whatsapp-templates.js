@@ -9,7 +9,7 @@
    Tab 2 DELIVERIES: camp.wa_* filled nightly by the edge function wa-deliveries-sync.
    Who sees it: everyone with Campaign Analytics ('campaigns'), plus a direct 'wa_templates' grant.
    ============================================================================================= */
-const WAT_TABS=['Templates','Deliveries','Knocking'];   // Knocking: 17 Nov 2026
+const WAT_TABS=['Templates','Deliveries','Knocking','Replies'];   // Replies: 25 Nov 2026   // Knocking: 17 Nov 2026
 let WAT_DATA=null, WAT_PROJ=null, WAT_STAGE=0;
 const WAT_STAGE_COL={'enquiry':'#2563eb','qualified':'#7c3aed','ov':'#d97706','site visit':'#059669','miss ov':'#dc2626'};
 /* LAYOUT (17 Nov 2026, third version - Ayush: "clumsy ... much less noisy, easier to explore ... remove extra text",
@@ -173,10 +173,10 @@ VIEWS.wa_templates=async function(v,seg){
     if(!WAT_DATA&&ti<2){ v.innerHTML=head+mTabs('wa_templates',WAT_TABS,ti)+watErrBox(); return; }
     if(ti>0){
       if(!WAD){ v.innerHTML=load; await wadPrep(); if(PAGE!=='wa_templates') return; }
-      const acc=ti===1?wadAccFor(watProj().label):((WAD.acc||[]).filter(function(a){ return /ananta/i.test(a.name); })[0]||null);
+      const acc=ti===1?wadAccFor(watProj().label):ti===3?warAcc():((WAD.acc||[]).filter(function(a){ return /ananta/i.test(a.name); })[0]||null);
       if(acc&&!WAD.byAcc[acc.id]){ v.innerHTML=load; await wadLoadAcc(acc.id); if(PAGE!=='wa_templates') return; }
     }
-    const body=ti===0?watTemplates():ti===1?watDeliveries():watKnocking();
+    const body=ti===0?watTemplates():ti===1?watDeliveries():ti===3?watReplies():watKnocking();
     v.innerHTML=head+mTabs('wa_templates',WAT_TABS,ti)+body;
     if(ti===1) wadDrawChart();
     // while Templates or Knocking is open, Deliveries' figures load in the background, so the tab opens at once
@@ -208,7 +208,7 @@ window.watPop=function(i){
   if(o.m){ const m=o.m, c=function(l,v,pc,cl){ return '<div class="wpp-s"><div style="color:'+cl+'">'+l+'</div><b>'+v+'</b><small>'+(pc||'&nbsp;')+'</small></div>'; };
     stats='<div class="wpp-foot"><div class="wpp-lbl">'+esc(fmtDate(o.range.s))+(o.range.s!==o.range.e?' – '+esc(fmtDate(o.range.e)):'')+'</div><div class="wpp-stats">'
       +c('Sent',wadN(m.sent),'','#64748b')+c('Delivered',wadN(m.delivered),wadPct(m.delivered,m.sent),'#2563eb')+c('Read',wadN(m.read),wadPct(m.read,m.delivered),'#16a34a')
-      +c('Clicked',wadN(m.clicked),wadPct(m.clicked,m.read),'#7c3aed')+c(o.failLabel||'Failed',o.tracksFail?wadN(m.failed):'NA',o.failLabel?wadPct(m.failed,m.sent):'','#dc2626')+'</div>'
+      +c('Clicked',wadN(m.clicked),wadPct(m.clicked,m.read),'#7c3aed')+c('Replied',WAD_REP&&m.replied!=null?wadN(m.replied):'NA',WAD_REP&&m.replied!=null?wadPct(m.replied,m.read):'','#0891b2')+c(o.failLabel||'Failed',o.tracksFail?wadN(m.failed):'NA',o.failLabel?wadPct(m.failed,m.sent):'','#dc2626')+'</div>'
       +(o.btns&&o.btns.length?'<div class="wpp-lbl" style="margin-top:14px">Button clicks</div><div class="kn-b" style="display:flex;flex-wrap:wrap;gap:6px">'+o.btns.map(function(b){ return /PHONE/i.test(b.type)?'<span style="border:1px solid var(--line);background:#f8fafc;color:#94a3b8;border-radius:999px;padding:4px 11px;font-size:12.5px">'+esc(b.text)+' · not counted by Meta</span>':'<span style="border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;border-radius:999px;padding:4px 11px;font-size:12.5px;font-weight:600">'+esc(b.text)+' · '+wadN((o.btnCount||{})[b.text]||0)+'</span>'; }).join('')+'</div>':'')
       +(Object.keys(m.reasons).length?'<div class="wpp-lbl" style="margin-top:14px">Why it failed</div>'+Object.keys(m.reasons).sort(function(a,b){ return m.reasons[b]-m.reasons[a]; }).map(function(w){ return '<div class="wpp-r"><span>'+esc(w)+'</span><b>'+m.reasons[w]+'</b></div>'; }).join(''):'')+'</div>'; }
   openModal('<style>'
@@ -230,7 +230,7 @@ window.watPop=function(i){
     +'.wppid .no{color:#667781;font-size:13px}'
     +'.wpp-foot{padding:16px 20px 20px;background:#fff}'
     +'.wpp-lbl{font-size:11px;font-weight:600;color:var(--slate);text-transform:uppercase;letter-spacing:.05em;margin:0 0 8px}'
-    +'.wpp-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}'
+    +'.wpp-stats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}'
     +'.wpp-s{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:9px 10px;font-size:11.5px;font-weight:600}.wpp-s b{display:block;font-size:18px;color:#0f172a;margin-top:2px}.wpp-s small{color:var(--slate);font-weight:500}'
     +'.wpp-r{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid #f1f5f9;font-size:13.5px}'
     +'@media(max-width:600px){.wpph{padding:13px 14px;gap:10px}.wpph .av{width:38px;height:38px;font-size:21px}.wpph .nm{font-size:16px}.wpph .lv b{font-size:12.5px;padding:5px 8px}'
@@ -299,7 +299,9 @@ const WAD_CSS='<style>'
 +'.wcal-foot{display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);padding:9px 12px}'
 +'.wcal-foot .clr{border:0;background:transparent;padding:0;font:inherit;font-size:12px;color:var(--slate);cursor:pointer}.wcal-foot .clr:hover{color:#dc2626}'
 +'.wcal-foot .done{margin-left:auto;height:31px;padding:0 17px;border:0;border-radius:8px;background:#1d4ed8;color:#fff;font:inherit;font-size:12px;font-weight:600;cursor:pointer}.wcal-foot .done[disabled]{opacity:.45;cursor:not-allowed}'
-+'.wad-cards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:0 0 14px}.wad-cards.c4{grid-template-columns:repeat(4,minmax(0,1fr))}'
++'.wad-cost{display:flex;gap:10px;align-items:center;background:#f0fdfa;border:1px solid #99f6e4;border-radius:10px;padding:10px 14px;margin:0 0 14px;font-size:13px;color:#134e4a}.wad-cost i{color:#0f766e}'
++'.war-row{display:grid;grid-template-columns:120px 200px minmax(0,1fr);gap:14px;padding:11px 16px;border-top:1px solid #f1f5f9;font-size:13px;align-items:start}.war-row .w{color:var(--slate);font-size:12px}.war-row .p{display:flex;flex-direction:column}.war-row .p span{color:var(--slate);font-size:12px}.war-row .t{white-space:pre-wrap;word-break:break-word}@media(max-width:720px){.war-row{grid-template-columns:1fr}}'
++'.wad-cards{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin:0 0 14px}.wad-cards.c4{grid-template-columns:repeat(5,minmax(0,1fr))}'
 +'.wad-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:13px 15px}'
 +'.wad-card .l{font-size:12px;color:var(--slate);font-weight:600;display:flex;align-items:center;gap:6px}.wad-card .l i{width:8px;height:8px;border-radius:50%}'
 +'.wad-card .v{font-size:24px;font-weight:700;color:#0f172a;margin-top:5px;line-height:1.1}.wad-card .p{font-size:12px;color:var(--slate);margin-top:2px}'
@@ -309,8 +311,8 @@ const WAD_CSS='<style>'
 +'.wad-stg{display:flex;gap:6px;overflow-x:auto;margin:0 0 10px;scrollbar-width:none}.wad-stg::-webkit-scrollbar{display:none}'
 +'.wad-stg button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 14px;font-size:13px;font-weight:600;color:#475569;cursor:pointer;white-space:nowrap;font-family:inherit}'
 +'.wad-stg button.on{background:#0f172a;border-color:#0f172a;color:#fff}'
-+'.wad-row{display:grid;grid-template-columns:54px 40px minmax(0,1fr) repeat(5,minmax(66px,auto)) 16px;gap:12px;align-items:center;padding:10px 16px;border-top:1px solid #f1f5f9;cursor:pointer}'
-+'.wad-row.kn{grid-template-columns:118px minmax(0,1fr) repeat(4,minmax(70px,auto)) 16px}'
++'.wad-row{display:grid;grid-template-columns:54px 40px minmax(0,1fr) repeat(6,minmax(62px,auto)) 16px;gap:12px;align-items:center;padding:10px 16px;border-top:1px solid #f1f5f9;cursor:pointer}'
++'.wad-row.kn{grid-template-columns:118px minmax(0,1fr) repeat(5,minmax(66px,auto)) 16px}'
 +'.wad-row:hover{background:#f8fafc}'
 +'.wad-row.h{cursor:default;background:#f8fafc;font-size:11px;font-weight:600;color:var(--slate);text-transform:uppercase;letter-spacing:.03em;padding:9px 16px;border-top:0}'
 +'.wad-row .th{width:40px;height:40px;border-radius:8px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;overflow:hidden}.wad-row .th img{width:100%;height:100%;object-fit:cover}'
@@ -395,6 +397,15 @@ async function wadPages(q){   // four pages at a time until one comes back short
   let out=[]; for(let f=0;;f+=4000){ const got=await Promise.all([0,1,2,3].map(function(i){ return q().range(f+i*1000,f+i*1000+999); }));
     for(const g of got){ out=out.concat(g.data||[]); if(g.error||!g.data||g.data.length<1000) return out; } }
 }
+/* REPLIED (25 Nov 2026, Ayush: "how many Replies were given can be extracted?? Try again"): Meta's template_analytics gives
+   'replied' per template per day - customers who answered the template with a message of their own. Meta gives the count
+   only, not what they wrote. Column camp.wa_template_daily.replied (added 25 Nov 20:05 IST); before that it is left out. */
+let WAD_REP=true;
+async function wadDailyPart(C,p){
+  const q=function(cols){ return function(){ return C.from('wa_template_daily').select(cols).in('template_id',p).gte('day',WAD_Y0).order('day').order('template_id'); }; };
+  if(WAD_REP){ const t=await C.from('wa_template_daily').select('replied').limit(1); if(t.error) WAD_REP=false; }
+  return wadPages(q('template_id,day,sent,delivered,read,clicked,clicks'+(WAD_REP?',replied':'')));
+}
 async function wadLoad(){
   const C=sb.schema('camp');
   const got=await Promise.all([
@@ -416,10 +427,16 @@ async function wadLoadAcc0(accId){
   const parts=[]; for(let i=0;i<ids.length;i+=60) parts.push(ids.slice(i,i+60));
   const res=await Promise.all([
     C.from('wa_templates').select('id,components').eq('waba_id',accId).then(function(r){ return r.data||[]; },function(){ return []; })
-  ].concat(parts.map(function(p){ return wadPages(function(){ return C.from('wa_template_daily').select('template_id,day,sent,delivered,read,clicked,clicks').in('template_id',p).gte('day',WAD_Y0).order('day').order('template_id'); }); })));
+  ].concat(parts.map(function(p){ return wadDailyPart(C,p); })));
   const comp={}; (res[0]||[]).forEach(function(x){ comp[x.id]=x.components; });
   WAD.tpl.forEach(function(t){ if(t.waba_id===accId) t.components=comp[t.id]||null; });
   WAD.byAcc[accId]={daily:[].concat.apply([],res.slice(1))};
+  // 25 Nov 2026: the number's daily cost (camp.wa_cost_daily) and the customers' messages (camp.wa_inbound) - empty until those
+  // tables exist (25 Nov 20:03 IST) and, for messages, until the number is subscribed to JAIN-E's app at Meta
+  const ex=await Promise.all([
+    C.from('wa_cost_daily').select('day,category,pricing_type,volume,cost').eq('waba_id',accId).gte('day',WAD_Y0).order('day').range(0,4999).then(function(r){ return r.error?null:(r.data||[]); },function(){ return null; }),
+    C.from('wa_inbound').select('id,ts,from_phone,from_name,kind,body,business_number').eq('waba_id',accId).gte('ts',WAD_Y0+'T00:00:00+05:30').order('ts',{ascending:false}).range(0,4999).then(function(r){ return r.error?null:(r.data||[]); },function(){ return null; })]);
+  WAD.byAcc[accId].cost=ex[0]; WAD.byAcc[accId].inbound=ex[1];
 }
 function wadAccFor(label){ const pn=function(x){ return String(x||'').toLowerCase().replace(/dream|by jain group/g,'').replace(/[^a-z0-9]/g,''); };
   return ((WAD&&WAD.acc)||[]).filter(function(a){ return pn(a.name)===pn(label); })[0]||null; }
@@ -431,15 +448,16 @@ function knBody(t){ const c=(t.components||[]).filter(function(x){ return x.type
 function knButtons(t){ const c=(t.components||[]).filter(function(x){ return x.type==='BUTTONS'; })[0]; return ((c&&c.buttons)||[]).map(function(b){ return {text:b.text,type:b.type}; }); }
 function wadChips(btns,cnt){ return btns.length?'<div class="wad-btns">'+btns.map(function(b){ return /PHONE/i.test(b.type)?'<span class="off" title="Meta does not count clicks on call buttons">'+esc(b.text)+' · not counted</span>':'<span>'+esc(b.text)+' · '+wadN((cnt||{})[b.text]||0)+'</span>'; }).join('')+'</div>':''; }
 function wadCard(col,l,v,pc,ttl){ return '<div class="wad-card"'+(ttl?' title="'+esc(ttl)+'"':'')+'><div class="l"><i style="background:'+col+'"></i>'+l+'</div><div class="v">'+v+'</div><div class="p">'+(pc||'&nbsp;')+'</div></div>'; }
+const WAD_RP='Customers who answered this message by typing a reply (Meta counts them; it does not give what they wrote)';
 const WAD_ND='Meta does not report failed messages - this is sent minus delivered (failed, or not delivered yet)';
 // sums per template (in the range) and per day (for the chart) of the chosen templates
 function wadSum(daily,ids,r){
-  const per={}, perDay={}, tot={sent:0,delivered:0,read:0,clicked:0}, r0=wadRange0();
+  const per={}, perDay={}, tot={sent:0,delivered:0,read:0,clicked:0,replied:0}, r0=wadRange0();
   daily.forEach(function(x){ if(!ids[x.template_id]) return;
     if(x.day>=r0.s&&x.day<=r0.e){ const dd=perDay[x.day]=perDay[x.day]||{sent:0,delivered:0,read:0}; dd.sent+=+x.sent||0; dd.delivered+=+x.delivered||0; dd.read+=+x.read||0; }
     if(x.day<r.s||x.day>r.e) return;
-    const m=per[x.template_id]=per[x.template_id]||{sent:0,delivered:0,read:0,clicked:0,btn:{}};
-    ['sent','delivered','read','clicked'].forEach(function(k){ m[k]+=+x[k]||0; tot[k]+=+x[k]||0; });
+    const m=per[x.template_id]=per[x.template_id]||{sent:0,delivered:0,read:0,clicked:0,replied:0,btn:{}};
+    ['sent','delivered','read','clicked','replied'].forEach(function(k){ m[k]+=+x[k]||0; tot[k]+=+x[k]||0; });
     (x.clicks||[]).forEach(function(c){ const b=c.button_content||c.type||'Button'; m.btn[b]=(m.btn[b]||0)+(+c.count||0); }); });
   return {per:per,perDay:perDay,tot:tot};
 }
@@ -462,21 +480,23 @@ function watDeliveries(){
   const S=wadSum(D,ids,r), tot=S.tot, nd=Math.max(0,tot.sent-tot.delivered);
   h+='<div class="wad-cards">'+wadCard('#64748b','Sent',wadN(tot.sent))+wadCard('#2563eb','Delivered',wadN(tot.delivered),wadPct(tot.delivered,tot.sent)+(tot.sent?' of sent':''))
     +wadCard('#16a34a','Read',wadN(tot.read),wadPct(tot.read,tot.delivered)+(tot.delivered?' of delivered':''))+wadCard('#7c3aed','Clicked',wadN(tot.clicked),wadPct(tot.clicked,tot.read)+(tot.read?' of read':''))
+    +wadCard('#0891b2','Replied',WAD_REP?wadN(tot.replied):'NA',WAD_REP?wadPct(tot.replied,tot.read)+(tot.read?' of read':''):'from tonight',WAD_RP)
     +wadCard('#dc2626','Not delivered',wadN(nd),wadPct(nd,tot.sent)+(tot.sent?' of sent':''),WAD_ND)+'</div>';
+  h+=wadCostBox(acc,r,tot);
   h+=wadChartBox(S.perDay);
   h+='<div class="wad-stg"><button class="'+(WAD_STAGE===-1?'on':'')+'" onclick="wadStage(-1)">All stages</button>'+stages.map(function(st,i){ return '<button class="'+(WAD_STAGE===i?'on':'')+'" onclick="wadStage('+i+')">'+esc(st.name)+'</button>'; }).join('')+'</div>';
   window._watRows=[];
-  let rows='<div class="wad-row h"><div>Day</div><div></div><div>Template</div><div style="text-align:right">Sent</div><div style="text-align:right">Delivered</div><div style="text-align:right">Read</div><div style="text-align:right">Clicked</div><div style="text-align:right" title="'+esc(WAD_ND)+'">Not delivered</div><div></div></div>';
+  let rows='<div class="wad-row h"><div>Day</div><div></div><div>Template</div><div style="text-align:right">Sent</div><div style="text-align:right">Delivered</div><div style="text-align:right">Read</div><div style="text-align:right">Clicked</div><div style="text-align:right" title="'+esc(WAD_RP)+'">Replied</div><div style="text-align:right" title="'+esc(WAD_ND)+'">Not delivered</div><div></div></div>';
   shown.forEach(function(st){
     if(WAD_STAGE===-1) rows+='<div class="wad-row h" style="display:block;background:#fff;color:#0f172a;font-size:12px;border-top:1px solid var(--line)">'+esc(st.name)+'</div>';
-    st.steps.forEach(function(s){ const t=byName[s.name], m=(t&&S.per[t.id])||{sent:0,delivered:0,read:0,clicked:0,btn:{}}, btns=t?knButtons(t):[], nd1=Math.max(0,m.sent-m.delivered);
+    st.steps.forEach(function(s){ const t=byName[s.name], m=(t&&S.per[t.id])||{sent:0,delivered:0,read:0,clicked:0,replied:0,btn:{}}, btns=t?knButtons(t):[], nd1=Math.max(0,m.sent-m.delivered);
       const pic=[s.attach].concat(s.preview||[]).filter(function(u){ return u&&/\.(jpe?g|png|webp|gif)(\?|$)/i.test(u); })[0], k=watKind(s.type);
-      const pi=window._watRows.push({p:p,st:st,s:s,m:{sent:m.sent,delivered:m.delivered,read:m.read,clicked:m.clicked,failed:nd1,reasons:{}},meta:t?[t]:[],tracksFail:true,failLabel:'Not delivered',range:r,btns:btns,btnCount:m.btn})-1;
+      const pi=window._watRows.push({p:p,st:st,s:s,m:{sent:m.sent,delivered:m.delivered,read:m.read,clicked:m.clicked,replied:m.replied,failed:nd1,reasons:{}},meta:t?[t]:[],tracksFail:true,failLabel:'Not delivered',range:r,btns:btns,btnCount:m.btn})-1;
       rows+='<div class="wad-row" onclick="watPop('+pi+')"><div class="d" style="font-size:12px;color:var(--slate);font-weight:600">'+(s.day==null?'':'Day <b style="color:#0f172a;font-size:15px">'+s.day+'</b>')+'</div>'
         +'<div class="th">'+(pic?'<img src="'+esc(pic)+'" alt="" loading="lazy">':'<i class="'+k[0]+'"></i>')+'</div>'
         +'<div class="tt"><div class="t">'+esc(watTitle(s))+'</div><div class="id">'+esc(s.name)+(t?'':' · not found on this number')+'</div>'+wadChips(btns,m.btn)+'</div>'
         +'<div class="nums"><div class="n" data-l="Sent">'+wadN(m.sent)+'</div><div class="n" data-l="Delivered">'+wadN(m.delivered)+'<small>'+wadPct(m.delivered,m.sent)+'</small></div><div class="n" data-l="Read">'+wadN(m.read)+'<small>'+wadPct(m.read,m.delivered)+'</small></div>'
-        +'<div class="n" data-l="Clicked">'+wadN(m.clicked)+'<small>'+wadPct(m.clicked,m.read)+'</small></div><div class="n'+(nd1?' bad':'')+'" data-l="Not delivered">'+wadN(nd1)+'</div></div>'
+        +'<div class="n" data-l="Clicked">'+wadN(m.clicked)+'<small>'+wadPct(m.clicked,m.read)+'</small></div><div class="n" data-l="Replied">'+(WAD_REP?wadN(m.replied)+'<small>'+wadPct(m.replied,m.read)+'</small>':'NA')+'</div><div class="n'+(nd1?' bad':'')+'" data-l="Not delivered">'+wadN(nd1)+'</div></div>'
         +'<i class="fa-solid fa-chevron-right cv"></i></div>';
     });
   });
@@ -532,19 +552,20 @@ function watKnocking(){
   const S=wadSum(WAD.byAcc[acc.id].daily,ids,r), tot=S.tot, nd=Math.max(0,tot.sent-tot.delivered);
   h+='<div class="wad-cards c4">'+wadCard('#64748b','Sent',wadN(tot.sent))+wadCard('#2563eb','Delivered',wadN(tot.delivered),wadPct(tot.delivered,tot.sent)+(tot.sent?' of sent':''))
     +wadCard('#dc2626','Not delivered',wadN(nd),wadPct(nd,tot.sent)+(tot.sent?' of sent':''),WAD_ND)
-    +wadCard('#16a34a','Read',wadN(tot.read),wadPct(tot.read,tot.delivered)+(tot.delivered?' of delivered':''))+'</div>';
+    +wadCard('#16a34a','Read',wadN(tot.read),wadPct(tot.read,tot.delivered)+(tot.delivered?' of delivered':''))
+    +wadCard('#0891b2','Replied',WAD_REP?wadN(tot.replied):'NA',WAD_REP?wadPct(tot.replied,tot.read)+(tot.read?' of read':''):'from tonight',WAD_RP)+'</div>';
   const cols=[['First knock','#0f172a'],['Said Yes','#16a34a'],['Said No','#dc2626'],['No reply','#d97706']];
   const ordered=tpl.slice().sort(function(a,b){ return knBranch(a.name)-knBranch(b.name)||knStep(a.name)-knStep(b.name)||a.name.localeCompare(b.name); });
   window._watRows=[];
-  let rows='<div class="wad-row kn h"><div>Path</div><div>Template</div><div style="text-align:right">Sent</div><div style="text-align:right">Delivered</div><div style="text-align:right" title="'+esc(WAD_ND)+'">Not delivered</div><div style="text-align:right">Read</div><div></div></div>';
+  let rows='<div class="wad-row kn h"><div>Path</div><div>Template</div><div style="text-align:right">Sent</div><div style="text-align:right">Delivered</div><div style="text-align:right" title="'+esc(WAD_ND)+'">Not delivered</div><div style="text-align:right">Read</div><div style="text-align:right" title="'+esc(WAD_RP)+'">Replied</div><div></div></div>';
   ordered.forEach(function(t){
-    const c=cols[knBranch(t.name)], m=S.per[t.id]||{sent:0,delivered:0,read:0,clicked:0,btn:{}}, btns=knButtons(t), body=knBody(t), nd1=Math.max(0,m.sent-m.delivered);
+    const c=cols[knBranch(t.name)], m=S.per[t.id]||{sent:0,delivered:0,read:0,clicked:0,replied:0,btn:{}}, btns=knButtons(t), body=knBody(t), nd1=Math.max(0,m.sent-m.delivered);
     const s={text:body+(btns.length?'\nCTA - '+btns.map(function(b){ return b.text; }).join(' & '):''),name:t.name,day:null,status:'',type:'text'};
-    const pi=window._watRows.push({p:{label:acc.name},st:{name:knLabel(t.name)},s:s,meta:[t],m:{sent:m.sent,delivered:m.delivered,read:m.read,clicked:m.clicked,failed:nd1,reasons:{}},tracksFail:true,failLabel:'Not delivered',btns:btns,btnCount:m.btn,range:r})-1;
+    const pi=window._watRows.push({p:{label:acc.name},st:{name:knLabel(t.name)},s:s,meta:[t],m:{sent:m.sent,delivered:m.delivered,read:m.read,clicked:m.clicked,replied:m.replied,failed:nd1,reasons:{}},tracksFail:true,failLabel:'Not delivered',btns:btns,btnCount:m.btn,range:r})-1;
     rows+='<div class="wad-row kn" onclick="watPop('+pi+')"><div class="pth"><span class="wad-path" style="color:'+c[1]+'"><i style="background:'+c[1]+'"></i><span>'+esc(knLabel(t.name))+'</span></span></div>'
       +'<div class="tt"><div class="t">'+esc(watTitle({text:body}))+'</div><div class="id">'+esc(t.name)+'</div>'+(btns.length?wadChips(btns,m.btn):'<div class="wad-btns"><span class="off">No buttons</span></div>')+'</div>'
       +'<div class="nums"><div class="n" data-l="Sent">'+wadN(m.sent)+'</div><div class="n" data-l="Delivered">'+wadN(m.delivered)+'<small>'+wadPct(m.delivered,m.sent)+'</small></div>'
-      +'<div class="n'+(nd1?' bad':'')+'" data-l="Not delivered">'+wadN(nd1)+'<small>'+wadPct(nd1,m.sent)+'</small></div><div class="n" data-l="Read">'+wadN(m.read)+'<small>'+wadPct(m.read,m.delivered)+'</small></div></div>'
+      +'<div class="n'+(nd1?' bad':'')+'" data-l="Not delivered">'+wadN(nd1)+'<small>'+wadPct(nd1,m.sent)+'</small></div><div class="n" data-l="Read">'+wadN(m.read)+'<small>'+wadPct(m.read,m.delivered)+'</small></div><div class="n" data-l="Replied">'+(WAD_REP?wadN(m.replied)+'<small>'+wadPct(m.replied,m.read)+'</small>':'NA')+'</div></div>'
       +'<i class="fa-solid fa-chevron-right cv"></i></div>';
   });
   return h+'<div class="wat-list">'+(ordered.length?rows:'<div style="padding:16px;color:var(--slate)">No knocking templates on this number.</div>')+'</div>';
@@ -623,3 +644,43 @@ window.wadReport=async function(){
   }catch(e){ toast('Could not make the report: '+e.message,'err'); }
   if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-file-arrow-down"></i> Download report'; }
 };
+
+/* WHATSAPP COST (25 Nov 2026, Ayush: "I want 2"): what Meta charged this number in the range - every message it charged
+   for, not only the drip templates (the knocking messages and anything else sent from the number count too). Free
+   messages (replies inside the customer's 24-hour window, ad-started chats) are counted but cost nothing. */
+function wadCostBox(acc,r,tot){
+  const rows=(WAD.byAcc[acc.id]&&WAD.byAcc[acc.id].cost);
+  if(rows==null) return '<div class="wad-cost"><i class="fa-solid fa-indian-rupee-sign"></i><span><b>WhatsApp cost</b> - shown from tonight (8 PM), when Meta’s daily cost starts being stored.</span></div>';
+  let cost=0, paid=0, free=0; const cat={};
+  rows.forEach(function(x){ if(x.day<r.s||x.day>r.e) return; cost+=+x.cost||0; if(+x.cost>0){ paid+=+x.volume||0; const c=cat[x.category]=cat[x.category]||{n:0,c:0}; c.n+=+x.volume||0; c.c+=+x.cost||0; } else free+=+x.volume||0; });
+  const inr=function(v){ return '₹'+Number(v).toLocaleString('en-IN',{maximumFractionDigits:v<100?2:0}); };
+  const per=function(n){ return n>0&&cost>0?inr(cost/n):'NA'; };
+  return '<div class="wad-cost"><i class="fa-solid fa-indian-rupee-sign"></i><span><b>WhatsApp cost '+inr(cost)+'</b> for this number in the period · '+wadN(paid)+' charged messages'
+    +Object.keys(cat).sort().map(function(k){ return ' ('+esc(k.charAt(0)+k.slice(1).toLowerCase())+' '+wadN(cat[k].n)+' · '+inr(cat[k].c)+')'; }).join('')
+    +' · '+wadN(free)+' free · <b>'+per(tot.replied)+'</b> per reply · <b>'+per(tot.read)+'</b> per read</span></div>';
+}
+/* REPLIES TAB (25 Nov 2026, Ayush: "I want ... 3"): what customers wrote back to each WhatsApp number, newest first, with
+   their name and number. Filled by the wa-replies webhook once the numbers are subscribed to JAIN-E's app at Meta. */
+let WAR_ACC=null;
+window.warPick=function(id){ WAR_ACC=id; renderPage(); };
+function warAcc(){ const L=(WAD&&WAD.acc)||[]; return L.filter(function(a){ return a.id===WAR_ACC; })[0]||L.filter(function(a){ return /ananta/i.test(a.name); })[0]||L[0]||null; }
+function watReplies(){
+  if(!WAD) return '<div class="loader"><div class="spin"></div></div>';
+  const acc=warAcc(); let h=WAD_CSS;
+  if(!acc) return h+wadNoData();
+  const L=(WAD.acc||[]).slice().sort(function(a,b){ return a.name.localeCompare(b.name); });
+  h+='<div class="wat-top"><select class="sel" style="height:36px" onchange="warPick(this.value)">'+L.map(function(a){ return '<option value="'+esc(a.id)+'"'+(a.id===acc.id?' selected':'')+'>'+esc(a.name)+'</option>'; }).join('')+'</select></div>';
+  h+=wadBar();
+  const rows=WAD.byAcc[acc.id]&&WAD.byAcc[acc.id].inbound, r=wadRange();
+  if(rows==null||!rows.length&&!(WAD.byAcc[acc.id]||{}).anyIn){
+    return h+'<div class="wad-empty"><i class="fa-brands fa-whatsapp" style="font-size:22px;color:#16a34a"></i><div><b style="color:#0f172a">No replies received yet.</b><br>Customers’ messages appear here once this WhatsApp number is connected to JAIN-E at Meta. Until then, the number of replies per template is in Deliveries and Knocking.</div></div>';
+  }
+  const day=function(ts){ return new Date(new Date(ts).getTime()+330*60000).toISOString().slice(0,10); };
+  const shown=rows.filter(function(x){ const d=day(x.ts); return d>=r.s&&d<=r.e; });
+  const who={}; shown.forEach(function(x){ who[x.from_phone]=1; });
+  h+='<div class="wad-cards c4" style="grid-template-columns:repeat(2,minmax(0,1fr))">'+wadCard('#0891b2','Messages received',wadN(shown.length))+wadCard('#16a34a','People who wrote',wadN(Object.keys(who).length))+'</div>';
+  const tm=function(ts){ const d=new Date(ts); return d.toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:true}); };
+  h+='<div class="wat-list">'+(shown.length?shown.map(function(x){ return '<div class="war-row"><div class="w">'+esc(tm(x.ts))+'</div><div class="p"><b>'+esc(x.from_name||'Unknown')+'</b><span>+'+esc(x.from_phone)+'</span></div><div class="t">'+esc(x.body||'')+'</div></div>'; }).join('')
+    :'<div style="padding:24px;text-align:center;color:var(--slate);font-size:13px">No messages in this period.</div>')+'</div>';
+  return h;
+}

@@ -37,14 +37,16 @@ function crmDuRender(dateStr,rows){
   const wrap=$('crmDuWrap'); if(!wrap)return;
   const props=rows.filter(function(r){return !r.is_total;});
   const total=rows.find(function(r){return r.is_total;});
+  // Leads added 23 Nov 2026 (the CRM report now carries them); a day saved before then shows a dash
+  const ld=function(r){ return (r.month_leads==null&&r.yesterday_leads==null)?'—':((r.month_leads||0)+' / '+(r.yesterday_leads||0)); };
   const rowsHtml=props.map(function(r){
-    return [r.property_label,r.month_qualified+' / '+r.yesterday_qualified,r.month_visits+' / '+r.yesterday_visits,r.agent_month_visits+' / '+r.agent_yesterday_visits];
+    return [r.property_label,ld(r),r.month_qualified+' / '+r.yesterday_qualified,r.month_visits+' / '+r.yesterday_visits,r.agent_month_visits+' / '+r.agent_yesterday_visits];
   });
   if(total){
-    rowsHtml.push(['<b>Total</b>','<b>'+total.month_qualified+' / '+total.yesterday_qualified+'</b>','<b>'+total.month_visits+' / '+total.yesterday_visits+'</b>','<b>'+total.agent_month_visits+' / '+total.agent_yesterday_visits+'</b>']);
+    rowsHtml.push(['<b>Total</b>','<b>'+ld(total)+'</b>','<b>'+total.month_qualified+' / '+total.yesterday_qualified+'</b>','<b>'+total.month_visits+' / '+total.yesterday_visits+'</b>','<b>'+total.agent_month_visits+' / '+total.agent_yesterday_visits+'</b>']);
   }
   const tableHtml=rowsHtml.length
-    ? mTable(['Property','Qualified (Month / Yesterday)','Site Visits (Month / Yesterday)','Agent Visits (Month / Yesterday)'],rowsHtml)
+    ? mTable(['Property','Leads (Month / Yesterday)','Qualified (Month / Yesterday)','Site Visits (Month / Yesterday)','Agent Visits (Month / Yesterday)'],rowsHtml)
     : '<div class="card card-pad empty" style="padding:32px;text-align:center">No rows recorded for '+esc(fmtDate(dateStr))+'</div>';
   const runAt=props.length&&props[0].run_at?('<div style="font-size:12px;color:var(--slate);margin-top:10px">Last extracted '+esc(fmtDate(props[0].run_at))+'</div>'):'';
   wrap.innerHTML=crmDuDatePicker(dateStr)+tableHtml+runAt;

@@ -549,13 +549,13 @@ VIEWS.recruitment_new=async function(v,seg){
   const slots=[
     {label:'Tests',run:recTests},
     canApprove?{label:'Job Descriptions',run:()=>recLoadJDs(v)}:null,
-    {label:'Hiring Request',run:tpManpower},
+    {label:'Hiring Requests',run:tpManpower},   // renamed from 'Hiring Request' 23 Nov 2026
     {label:recCanWrite()?'Referrals':'Refer to HR',run:tpReferrals},
   ].filter(Boolean);
   const tabs=slots.map(s=>s.label);
   const ti=mTab(seg,tabs.length);
   v.innerHTML=REC_RO_CSS+TP_CSS+mHead('fa-user-plus','#0369a1','Recruitment')
-    +(recCanWrite()?'':'<div class="rec-ro"><i class="fa-solid fa-lock"></i> Approving, editing and deleting here is limited to HR, Abhay Mati and Administrators — anyone can still submit a ManPower Form or Referral.</div>')
+    +(recCanWrite()?'':'<div class="rec-ro"><i class="fa-solid fa-lock"></i> Editing and deleting here is limited to HR, Abhay Mati and Administrators — anyone can still raise a Hiring Request or refer someone.</div>')
     +mTabs('recruitment_new',tabs,ti)+'<div id="recBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
   recWatchPerms();
   await slots[ti].run();
@@ -582,8 +582,8 @@ function rtRender(){
     <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
       <!-- RENAME AND DELETE ARE GONE, BY REQUEST. A test is not a document to tidy: results,
            attempts and answers hang off it, and renaming one silently relabels every result
-           already recorded against it. Email is what this screen is for. The functions are left
-           in the file, unreferenced, so nothing is lost if they are ever wanted back. -->
+           already recorded against it. Email is what this screen is for. (The old Add / Rename /
+           Delete / Get Link / Preview functions were removed 23 Nov 2026.) -->
       ${rtCanManage()?`
       <button class="btn" id="rtShareBtn" disabled style="${dis}" onclick="rtShare()"><i class="fa-solid fa-envelope"></i> Email</button>`
       : `<span style="font-size:12px;color:var(--slate);display:inline-flex;align-items:center;gap:6px"><i class="fa-solid fa-lock"></i> View only</span>`}
@@ -648,28 +648,6 @@ window.rtSyncToolbar=function(){
   const dis='opacity:.38;cursor:not-allowed;pointer-events:none';
   const shr=$('rtShareBtn');
   if(shr){shr.disabled=n!==1;shr.style.cssText=n===1?'':dis;}
-};
-window.rtAdd=function(){if(!recGuard()||!rtTestsGuard())return;
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <label>Test Name *</label><input id="rtFName" class="inp" placeholder="e.g. Sales Aptitude">
-    <label>Type *</label>
-    <select id="rtFEngine" class="inp" onchange="rtAddEngineToggle()">
-      <option value="native">Native — built in JainE (MCQ + descriptive, AI-graded)</option>
-      <option value="legacy">Legacy — external Google Form link</option>
-    </select>
-    <div id="rtFNativeFields">
-      <label>Duration <span style="font-size:11px;color:var(--slate)">(minutes — shown to the candidate, informational only)</span></label>
-      <input id="rtFDuration" class="inp" type="number" min="1" placeholder="e.g. 20">
-    </div>
-    <div id="rtFLegacyFields" style="display:none">
-      <label>Form Link</label><input id="rtFLink" class="inp" placeholder="http://form-timer.com/start/...">
-      <label>Response Sheet URL <span style="font-size:11px;color:var(--slate)">(Google Sheets URL for Preview)</span></label>
-      <input id="rtFSheet" class="inp" placeholder="https://docs.google.com/spreadsheets/d/...">
-    </div>
-  </div>
-  <div class="modal-foot"><button class="btn btn-primary" onclick="rtSave()">Add Test</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
-  setTimeout(()=>{const el=$('rtFName');if(el)el.focus();},100);
 };
 window.rtAddEngineToggle=function(){
   const native=($('rtFEngine')||{}).value==='native';
@@ -818,61 +796,6 @@ window.rtQDelete=async function(qId){
    for a specific candidate's email (and candidate_id if this test is being sent from a candidate's
    own row elsewhere — from the Tests tab directly there is no candidate context, so it's left null
    and Tests Sent/Test Passed stage automation simply does not fire for a link generated this way). ── */
-/* One click, no form: mints a real attempt under the previewer's own email and opens it
-   immediately in a new tab, so "does this test actually work" is answered by trying it, not by
-   reading a link out of a modal. Uses the exact same recruit-test-generate-link function a real
-   candidate's link comes from — this is not a fake/simulated preview, it is the real thing. */
-/* THE BUTTON IS DRAWN FOR EVERYONE, AND THE SERVER DECIDES.
-
-   It used to be hidden unless rtCanManage() said so, and when somebody who ought to have had it
-   could not see it there was nothing on the screen to explain why - a control that is simply
-   absent tells you nothing. Now it is always there, and a refusal comes back as a sentence naming
-   the reason. Nothing is loosened: recruit-test-generate-link still asks the database whether this
-   caller may do it, and a visible button does not make the request succeed.
-
-   THE TAB IS OPENED BEFORE THE AWAIT, NOT AFTER. A window.open that runs after an await has lost
-   the click that caused it, and browsers block it as a pop-up - so the old version could do
-   everything correctly, mint the attempt, and then appear to do nothing whatsoever. Opening the
-   tab while the click is still live and pointing it at the paper when the link arrives is what
-   makes Preview work from the page. If the tab is blocked anyway, the address is handed over
-   rather than the attempt being lost. */
-window.rtPreviewNative=async function(testId){
-  const test=(RT_RECORDS||[]).find(t=>t.id===testId);
-  const tab=window.open('', '_blank');          // on the click, before anything is awaited
-  if(tab){ try{ tab.document.write('<!doctype html><meta charset="utf-8"><title>Opening…</title>'
-    +'<body style="font:16px system-ui;padding:40px;color:#334155">Opening the test…</body>'); }catch(_e){} }
-  /* preview:true is what keeps a rehearsal out of Results. The attempt is still real - the paper
-     opens and grades exactly as a candidate's would - it simply is not counted as somebody having
-     sat the test, and carries no candidate, so it can never mark anybody 'Tests Sent'. */
-  const{data,error}=await sb.functions.invoke('recruit-test-generate-link',
-    {body:{test_id:testId,candidate_email:state.email||'preview@thejaingroup.com',
-           origin:location.origin,preview:true}});
-  if(error||data?.error){
-    if(tab) try{ tab.close(); }catch(_e){}
-    toast((data&&data.error)||(error&&error.message)||'Could not open the test','err');
-    return;
-  }
-  if(tab){ try{ tab.location.href=data.link; }catch(_e){ try{ tab.close(); }catch(_x){} } }
-  if(!tab||tab.closed){
-    openModal('<div class="modal-head"><h3><i class="fa-solid fa-eye"></i> '+esc((test&&test.name)||'Test')+'</h3>'
-      +'<span class="x" onclick="closeModal()">&times;</span></div>'
-      +'<div class="modal-body frm"><p style="margin:0 0 10px;color:var(--slate);font-size:13px">'
-      +'Your browser blocked the new tab. Open this instead — it is your preview, ready to sit.</p>'
-      +'<input class="inp" readonly value="'+esc(data.link)+'" onclick="this.select()"></div>'
-      +'<div class="modal-foot"><a class="btn btn-primary" href="'+esc(data.link)+'" target="_blank" rel="noopener">Open the test</a>'
-      +'<button class="btn" onclick="closeModal()">Close</button></div>');
-    return;
-  }
-  toast('Preview opened in a new tab — it will not appear in Results');
-};
-window.rtGetLink=function(testId){if(!rtTestsGuard())return;
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-link"></i> Get Test Link</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <label>Candidate Email *</label><input id="rtLinkEmail" class="inp" placeholder="candidate@example.com">
-  </div>
-  <div class="modal-foot"><button class="btn btn-primary" onclick="rtGetLinkGo(${testId})">Generate Link</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
-  setTimeout(()=>{const el=$('rtLinkEmail');if(el)el.focus();},100);
-};
 window.rtGetLinkGo=async function(testId){
   const email=($('rtLinkEmail')||{}).value?.trim();
   if(!email){toast('Candidate email is required','err');return;}
@@ -916,20 +839,6 @@ window.rtNativeSendGo=async function(){
     toast('Send failed: '+((e&&e.message)||'unknown error'),'err');
   }
 };
-window.rtRename=function(){if(!recGuard()||!rtTestsGuard())return;
-  const sel=[...document.querySelectorAll('.rt-chk:checked')];
-  if(sel.length!==1)return;
-  const id=parseInt(sel[0].value);
-  const rec=(RT_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> Rename Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <label>Test Name *</label><input id="rtFRename" class="inp" value="${esc(rec.name)}">
-    <label>Form Link</label><input id="rtFRLink" class="inp" value="${esc(rec.link||'')}">
-    <label>Response Sheet URL</label><input id="rtFRSheet" class="inp" value="${esc(rec.response_sheet_url||'')}">
-  </div>
-  <div class="modal-foot"><button class="btn btn-primary" onclick="rtUpdate(${id})">Save</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
-  setTimeout(()=>{const el=$('rtFRename');if(el)el.focus();},100);
-};
 window.rtUpdate=async function(id){
   if(!rtTestsGuard())return;
   const name=($('rtFRename')||{}).value?.trim();
@@ -941,15 +850,6 @@ window.rtUpdate=async function(id){
   const rec=(RT_RECORDS||[]).find(r=>r.id===id);
   if(rec){rec.name=name;rec.link=link;rec.response_sheet_url=sheet||null;}
   closeModal();toast('Test updated');rtRender();
-};
-window.rtDelete=async function(){if(!recGuard()||!rtTestsGuard())return;
-  const sel=[...document.querySelectorAll('.rt-chk:checked')].map(c=>parseInt(c.value));
-  if(!sel.length)return;
-  if(!await confirmDialog('Delete '+sel.length+' test(s)? All associated responses will also be deleted. This cannot be undone.'))return;
-  const{error}=await sb.schema('recruit').from('tests').delete().in('id',sel);
-  if(error){toast(error.message,'err');return;}
-  RT_RECORDS=(RT_RECORDS||[]).filter(r=>!sel.includes(r.id));
-  toast(sel.length+' test(s) deleted');rtRender();
 };
 
 /* ── Share Test (email a form link to candidates via the Email API backend) ── */
@@ -1503,19 +1403,16 @@ window.rtShareSend=async function(id){
 /* Native tests' own results view — same shape as the Google-Forms one above (Score, Timestamps,
    one row per person), except the row is real and clicking it opens that person's actual answers,
    since native tests grade themselves instead of needing a response sheet imported by hand. */
-/* SHOWPREVIEWS decides which of the two lists this is. Hiding rehearsals from the candidate
-   results was right - HR checking a paper is not a result - but hiding them from EVERYWHERE was
-   not: you could sit a test from JainE to check the grading and then have nowhere to see how it
-   was marked, which is the one thing a preview is for. So they are a second list rather than no
-   list, reached by a button, and never mixed into the first. */
-window.rtResultsNative=async function(testId,showPreviews){
+/* Candidate attempts only. The separate "My Previews" list (rehearsals, is_preview=true) had no
+   button left to reach it and was removed 23 Nov 2026. */
+window.rtResultsNative=async function(testId){
   const test=(RT_RECORDS||[]).find(t=>t.id===testId);if(!test)return;
   const panel=$('rtPreviewPanel');if(!panel)return;
   panel.style.display='block';
   panel.innerHTML=`<div class="card card-pad">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
       <i class="fa-solid fa-chart-simple" style="color:#0369a1;font-size:16px"></i>
-      <span style="font-weight:700;font-size:15px">${esc(test.name)} — ${showPreviews?'My Previews':'Results'}</span>
+      <span style="font-weight:700;font-size:15px">${esc(test.name)} — Results</span>
       <button style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:22px;line-height:1;color:var(--slate)" onclick="document.getElementById('rtPreviewPanel').style.display='none'">&times;</button>
     </div>
     <div id="rtResultsBody"><div class="loader"><div class="spin"></div></div></div>
@@ -1528,7 +1425,7 @@ window.rtResultsNative=async function(testId,showPreviews){
     // candidate had sat anything.
     let{data,error}=await sb.schema('recruit').from('test_attempts')
       .select('id,candidate_email,status,started_at,submitted_at,mcq_score,mcq_max,ai_score,ai_max,ai_status,final_pct,pass_fail')
-      .eq('test_id',testId).eq('is_preview',!!showPreviews).order('submitted_at',{ascending:false,nullsFirst:false});
+      .eq('test_id',testId).eq('is_preview',false).order('submitted_at',{ascending:false,nullsFirst:false});
     if(error)throw new Error(error.message);
 
     /* A RESULT IS SOMEBODY WHO PRESSED START. NOTHING ELSE.
@@ -1554,12 +1451,10 @@ window.rtResultsNative=async function(testId,showPreviews){
     if(!data.length){
       rb.innerHTML='<div class="empty" style="padding:36px;color:var(--slate)">'
         +'<i class="fa-solid fa-inbox" style="font-size:28px;opacity:.3;display:block;margin-bottom:10px"></i>'
-        +(showPreviews
-          ? 'You have not previewed this test yet. Press Preview on its row to sit it \u2014 the marking will show up here.'
-          : (waiting
-             ? '<b>'+waiting+' candidate'+(waiting===1?' has':'s have')+' been sent this test, but nobody has started it yet.</b>'
-               +'<div style="margin-top:6px;font-size:12.5px">A result appears the moment somebody opens their link and presses Start.</div>'
-             : 'No candidate has taken this test yet.'))
+        +(waiting
+           ? '<b>'+waiting+' candidate'+(waiting===1?' has':'s have')+' been sent this test, but nobody has started it yet.</b>'
+             +'<div style="margin-top:6px;font-size:12.5px">A result appears the moment somebody opens their link and presses Start.</div>'
+           : 'No candidate has taken this test yet.')
         +'</div>';
       return;
     }
@@ -1585,7 +1480,7 @@ window.rtResultsNative=async function(testId,showPreviews){
       return `<b style="color:${col}">${r.final_pct}%</b> <span style="font-size:11px;color:var(--slate)">(${(Number(r.mcq_score||0)+Number(r.ai_score||0))} / ${(Number(r.mcq_max||0)+Number(r.ai_max||0))})</span> — <span style="color:${col};font-weight:600">${r.pass_fail?'Pass':'Fail'}</span>`;
     };
     rb.innerHTML=`
-      <div style="font-size:12px;color:var(--slate);margin-bottom:10px">${data.length} ${showPreviews?('preview'+(data.length!==1?'s':'')+' · not counted anywhere'):('response'+(data.length!==1?'s':''))}${(!showPreviews&&waiting)?` · ${waiting} sent but not started yet`:''} · click a row to see answers</div>
+      <div style="font-size:12px;color:var(--slate);margin-bottom:10px">${data.length} response${data.length!==1?'s':''}${waiting?` · ${waiting} sent but not started yet`:''} · click a row to see answers</div>
       <div style="overflow-x:auto">
       <table class="tbl" style="min-width:500px">
         <thead><tr>
@@ -1619,7 +1514,7 @@ window.rtResultsAttemptDetail=async function(attemptId){
     const{data:qs}=await sb.schema('recruit').from('test_questions').select('*').eq('test_id',full.test_id).order('seq',{ascending:true});
     const{data:answers}=await sb.schema('recruit').from('test_answers').select('*').eq('attempt_id',attemptId);
     const byQ={}; (answers||[]).forEach(a=>byQ[a.question_id]=a);
-    rb.innerHTML=`<button class="btn btn-sm" onclick="rtResultsNative(${full.test_id},${!!full.is_preview})" style="margin-bottom:12px"><i class="fa-solid fa-arrow-left"></i> Back to ${full.is_preview?'Previews':'Results'}</button>
+    rb.innerHTML=`<button class="btn btn-sm" onclick="rtResultsNative(${full.test_id})" style="margin-bottom:12px"><i class="fa-solid fa-arrow-left"></i> Back to Results</button>
       <!-- No Retry / Re-grade button (removed 27 Oct 2026 at HR's request): grading is done once,
            when the candidate submits. -->
       <div style="font-size:13px;color:var(--slate);margin-bottom:14px">${esc(full.candidate_email||'—')} · ${full.final_pct!=null?full.final_pct+'% — '+(full.pass_fail?'Pass':'Fail'):'Not yet graded'}
@@ -1647,71 +1542,6 @@ window.rtResultsAttemptDetail=async function(attemptId){
       }).join('')}`;
   }catch(e){
     rb.innerHTML=`<div class="empty" style="padding:30px;color:var(--err)"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(e.message)}</div>`;
-  }
-};
-window.rtRegradeAttempt=async function(attemptId){
-  toast('Regrading…');
-  try{
-    const{data,error}=await sb.functions.invoke('recruit-test-regrade',{body:{attempt_id:attemptId}});
-    if(error||data?.error)throw new Error((data&&data.error)||error.message);
-    toast('Regraded: '+data.final_pct+'% — '+(data.pass_fail?'Pass':'Fail'));
-    rtResultsAttemptDetail(attemptId);
-  }catch(e){toast('Regrade failed: '+((e&&e.message)||e),'err');}
-};
-window.rtPreview=async function(id){
-  const rec=(RT_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
-  const panel=$('rtPreviewPanel');if(!panel)return;
-  panel.style.display='block';
-  panel.innerHTML=`<div class="card card-pad">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-      <i class="fa-solid fa-list-check" style="color:#0369a1;font-size:16px"></i>
-      <span style="font-weight:700;font-size:15px">${esc(rec.name)} — Responses</span>
-      <button style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:22px;line-height:1;color:var(--slate)" onclick="document.getElementById('rtPreviewPanel').style.display='none'">&times;</button>
-    </div>
-    <div id="rtPreviewBody"><div class="loader"><div class="spin"></div></div></div>
-  </div>`;
-  panel.scrollIntoView({behavior:'smooth',block:'start'});
-  const pb=$('rtPreviewBody');
-  try{
-    const{data,error}=await sb.schema('recruit').from('test_responses')
-      .select('respondent,score_got,score_total,time_taken,submitted_at,answers')
-      .eq('test_id',id)
-      .order('score_got',{ascending:false,nullsFirst:false});
-    if(error)throw new Error(error.message);
-    if(!data||!data.length){
-      pb.innerHTML='<div class="empty" style="padding:36px;color:var(--slate)"><i class="fa-solid fa-inbox" style="font-size:28px;opacity:.3;display:block;margin-bottom:10px"></i>No responses imported yet for this test.</div>';
-      return;
-    }
-    const pct=(g,t)=>t?Math.round(g/t*100):null;
-    const scoreTag=(g,t)=>{
-      if(g==null)return '<span style="color:var(--slate)">—</span>';
-      const p=pct(g,t);
-      const col=p==null?'var(--ink)':p>=70?'#16855a':p>=40?'#c08000':'#c83232';
-      return `<b style="color:${col}">${g}${t?' / '+t:''}</b>${p!=null?` <span style="font-size:11px;color:var(--slate)">(${p}%)</span>`:''}`;
-    };
-    const fmtDate=ts=>{if(!ts)return '—';try{return new Date(ts).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});}catch{return ts;}};
-    pb.innerHTML=`
-      <div style="font-size:12px;color:var(--slate);margin-bottom:10px">${data.length} response${data.length!==1?'s':''} · sorted by score</div>
-      <div style="overflow-x:auto">
-      <table class="tbl" style="min-width:400px">
-        <thead><tr>
-          <th style="width:36px;text-align:center">#</th>
-          <th>Respondent</th>
-          <th style="text-align:center;white-space:nowrap">Score</th>
-          <th style="white-space:nowrap">Time Taken</th>
-          <th style="white-space:nowrap">Date</th>
-        </tr></thead>
-        <tbody>${data.map((r,i)=>`<tr>
-          <td style="text-align:center;color:var(--slate);font-size:12px">${i+1}</td>
-          <td style="font-weight:500">${esc(r.respondent||'—')}</td>
-          <td style="text-align:center;white-space:nowrap">${scoreTag(r.score_got,r.score_total)}</td>
-          <td style="font-size:12px;color:var(--slate);white-space:nowrap">${esc(r.time_taken||'—')}</td>
-          <td style="font-size:12px;color:var(--slate);white-space:nowrap">${fmtDate(r.submitted_at)}</td>
-        </tr>`).join('')}
-        </tbody>
-      </table></div>`;
-  }catch(e){
-    pb.innerHTML=`<div class="empty" style="padding:30px;color:var(--err)"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(e.message)}</div>`;
   }
 };
 
@@ -1825,113 +1655,6 @@ function mpSelOpt(id,opts,val){
   h+=`<input id="${id}Custom" class="inp" style="margin-top:6px;display:${known||!val?'none':'block'}" value="${esc(!known?val:'')}">`;
   return h;
 }
-async function recManpower(){
-  const b=$('recBody');
-  if(!MP_RECORDS){
-    b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
-    try{const {data,error}=await sb.schema('hr').from('manpower_requests').select('*').order('submitted_at',{ascending:false});
-      if(error)throw error; MP_RECORDS=data||[];}catch(e){b.innerHTML='<div class="empty" style="padding:40px;color:#c83232">'+esc(e.message)+'</div>';return;}
-  }
-  const rows=MP_RECORDS;
-  const priTag=p=>p==='Urgent'?'<span class="tag t-red">Urgent</span>':'<span class="tag t-gray">'+(p||'—')+'</span>';
-  const dis='opacity:.38;cursor:not-allowed;pointer-events:none';
-  b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-    <div class="sec-title" style="margin:0">Hiring Requests <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
-    <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap" id="mpToolbar">
-      <button class="btn btn-primary" onclick="mpFillForm()"><i class="fa-solid fa-pen-to-square"></i> Fill Form</button>
-      <button class="btn" id="mpEditBtn" disabled style="${dis}" onclick="mpEditSel()"><i class="fa-solid fa-pen"></i> Edit</button>
-      <button class="btn" id="mpDelBtn" disabled style="${dis};color:var(--err);border-color:var(--err)" onclick="mpDeleteSel()"><i class="fa-solid fa-trash"></i> Delete</button>
-    </div>
-  </div>
-  <div style="overflow-x:auto">
-  <table class="tbl" id="mpTbl">
-    <thead><tr>
-      <th style="width:36px;text-align:center"><input type="checkbox" id="mpChkAll" onchange="mpToggleAll(this)"></th>
-      <th>Job Title</th><th>Department</th><th>Date of Request</th>
-      <th style="text-align:center">Vacancy</th><th>Reporting To / HOD</th><th>Experience</th><th>Salary Range</th><th>Location</th><th>Priority</th>
-    </tr></thead>
-    <tbody>${rows.length?rows.map(r=>`<tr class="mp-row" style="cursor:pointer" onclick="mpShowDetail(${r.id},event)">
-      <td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="mp-chk" value="${r.id}" onchange="mpSyncToolbar()"></td>
-      <td style="font-weight:600">${esc(r.job_title||'—')}</td>
-      <td>${esc(r.department||'—')}</td>
-      <td style="color:var(--slate);font-size:12px;white-space:nowrap">${esc(mpFmtDate(r.date_of_request))}</td>
-      <td style="text-align:center">${esc(String(r.no_of_vacancy||'—'))}</td>
-      <td style="font-size:12px">${esc(r.reporting_person||'—')}</td>
-      <td style="font-size:12px">${esc(r.experience||'—')}</td>
-      <td style="font-size:12px">${esc(r.salary_range||'—')}</td>
-      <td>${esc(r.location||'—')}</td>
-      <td>${priTag(r.priority)}</td>
-    </tr>`).join(''):'<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--slate)">No hiring requests yet — click <b>Fill Form</b> to add one</td></tr>'}
-    </tbody>
-  </table>
-  </div>
-  <div id="mpDetail" style="display:none"></div>`;
-}
-window.mpToggleAll=function(el){document.querySelectorAll('.mp-chk').forEach(c=>c.checked=el.checked);mpSyncToolbar();};
-window.mpSyncToolbar=function(){
-  const sel=[...document.querySelectorAll('.mp-chk:checked')];
-  const n=sel.length;
-  const dis='opacity:.38;cursor:not-allowed;pointer-events:none';
-  const editBtn=$('mpEditBtn'),delBtn=$('mpDelBtn');
-  if(editBtn){editBtn.disabled=n!==1;editBtn.style.cssText=n===1?'':'opacity:.38;cursor:not-allowed;pointer-events:none';}
-  if(delBtn){delBtn.disabled=n===0;delBtn.style.cssText=n>0?'color:var(--err);border-color:var(--err)':'opacity:.38;cursor:not-allowed;pointer-events:none;color:var(--err);border-color:var(--err)';}
-};
-window.mpEditSel=function(){if(!recGuard())return;
-  const sel=[...document.querySelectorAll('.mp-chk:checked')];
-  if(sel.length!==1)return;
-  mpEdit(parseInt(sel[0].value));
-};
-window.mpDeleteSel=async function(){if(!recGuard())return;
-  const sel=[...document.querySelectorAll('.mp-chk:checked')].map(c=>parseInt(c.value));
-  if(!sel.length)return;
-  if(!await confirmDialog('Delete '+sel.length+' hiring request'+(sel.length===1?'':'s')+'? This cannot be undone.'))return;
-  const {error}=await sb.schema('hr').from('manpower_requests').delete().in('id',sel);
-  if(error){toast(error.message,'err');return;}
-  if(MP_RECORDS)MP_RECORDS=MP_RECORDS.filter(r=>!sel.includes(r.id));
-  toast(sel.length+' deleted');mpRefreshList();
-};
-window.mpShowDetail=function(id,e){
-  if(e&&e.target&&e.target.type==='checkbox')return;
-  const rec=(MP_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
-  const panel=$('mpDetail');if(!panel)return;
-  const priTag=p=>p==='Urgent'?'<span class="tag t-red">Urgent</span>':'<span class="tag t-gray">'+(p||'—')+'</span>';
-  // Highlight active row
-  document.querySelectorAll('.mp-row').forEach(tr=>tr.style.background='');
-  const rows=[...document.querySelectorAll('.mp-row')];
-  const activeRow=rows.find(tr=>{const chk=tr.querySelector('.mp-chk');return chk&&parseInt(chk.value)===id;});
-  if(activeRow)activeRow.style.background='#fdf4f6';
-  panel.style.display='block';
-  panel.innerHTML=`<div class="card card-pad" style="margin-top:14px;position:relative">
-    <button style="position:absolute;top:12px;right:12px;background:none;border:none;cursor:pointer;font-size:18px;color:var(--slate);line-height:1" onclick="mpCloseDetail()">&times;</button>
-    <div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;padding-right:32px">
-      <div style="flex:1;min-width:220px">
-        <div style="font-size:18px;font-weight:700;color:var(--ink)">${esc(rec.job_title||'—')}</div>
-        <div style="color:var(--slate);font-size:13px;margin-top:2px">${esc(rec.department||'—')} &nbsp;·&nbsp; ${mpFmtDate(rec.date_of_request)}</div>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        ${priTag(rec.priority)}
-        <button class="btn btn-sm btn-primary" onclick="mpEdit(${rec.id})"><i class="fa-solid fa-pen"></i> Edit</button>
-        <button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="mpDeleteOne(${rec.id})"><i class="fa-solid fa-trash"></i> Delete</button>
-      </div>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 20px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
-      <div><div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em">Vacancies</div><div style="font-size:14px;margin-top:2px">${esc(String(rec.no_of_vacancy||'—'))}</div></div>
-      <div><div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em">Reporting To / HOD</div><div style="font-size:14px;margin-top:2px">${esc(rec.reporting_person||'—')}</div></div>
-      <div><div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em">Qualification</div><div style="font-size:14px;margin-top:2px">${esc(rec.qualification||'—')}</div></div>
-      <div><div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em">Experience</div><div style="font-size:14px;margin-top:2px">${esc(rec.experience||'—')}</div></div>
-      <div><div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em">Gender</div><div style="font-size:14px;margin-top:2px">${esc(rec.gender||'—')}</div></div>
-      <div><div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em">Salary Range</div><div style="font-size:14px;margin-top:2px">${esc(rec.salary_range||'—')}</div></div>
-      <div><div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em">Location</div><div style="font-size:14px;margin-top:2px">${esc(rec.location||'—')}</div></div>
-    </div>
-    ${rec.job_description?`<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)"><div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em;margin-bottom:6px">Job Description / KPI</div><div style="font-size:13.5px;white-space:pre-wrap;line-height:1.6;color:var(--ink)">${esc(rec.job_description)}</div></div>`:''}
-    ${rec.notes?`<div style="margin-top:12px;padding:10px 14px;background:#fefce8;border-radius:8px;border:1px solid #fde68a"><span style="font-size:11px;font-weight:700;text-transform:uppercase;color:#a16207">Note · </span><span style="font-size:13px;color:#78350f">${esc(rec.notes)}</span></div>`:''}
-    ${mpAiPanel(rec)}
-  </div>`;
-};
-window.mpCloseDetail=function(){
-  const p=$('mpDetail');if(p)p.style.display='none';
-  document.querySelectorAll('.mp-row').forEach(tr=>tr.style.background='');
-};
 window.mpSelChange=function(id){
   const sel=$(`${id}Sel`),cust=$(`${id}Custom`);
   if(sel&&cust)cust.style.display=sel.value==='__other'?'block':'none';
@@ -2079,24 +1802,9 @@ function mpCollect(){
     submitted_at:new Date().toISOString()
   };
 }
-window.mpFillForm=function(){if(!recGuard())return;mpModal('Hiring Request',null,'<button class="btn btn-primary" id="mpSaveBtn" onclick="mpSave()"><i class="fa-solid fa-check"></i> Submit</button>');};
-window.mpSave=async function(){
-  const d=mpCollect();
-  if(!d.job_title){toast('Job Title is required','err');return;}
-  const btn=$('mpSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
-  const {data,error}=await sb.schema('hr').from('manpower_requests').insert(d).select().single();
-  if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Submit';}return;}
-  MP_RECORDS=[data,...(MP_RECORDS||[])];closeModal();toast('Hiring request submitted');mpRefreshList();
-};
-/* REDRAW WHICHEVER LIST IS ACTUALLY ON SCREEN.
-
-   Both layouts render into #recBody: the Hiring Request tab through tpMpRender, and the retired
-   recruitment page through recManpower. Saving an edit called recManpower unconditionally, so the
-   new tab was redrawn with the OLD toolbar - same data, different screen, and only ever after an
-   edit, which is why it looked like the page had changed its mind. */
+// Redraws the Hiring Requests tab after an edit (the retired recManpower list is gone).
 function mpRefreshList(){
-  if(PAGE==='recruitment_new'&&typeof tpManpower==='function'){ tpManpower(); return; }
-  recManpower();
+  if(typeof tpManpower==='function') tpManpower();
 }
 // HR, or whoever raised the request (tpMpCanChange) - the database still refuses once anybody is on it.
 window.mpEdit=function(id){
@@ -2115,476 +1823,6 @@ window.mpUpdate=async function(id){
   if(idx>-1&&MP_RECORDS)MP_RECORDS[idx]=data;
   closeModal();toast('Updated');mpRefreshList();
 };
-window.mpDeleteOne=async function(id){if(!recGuard())return;
-  if(!await confirmDialog('Delete this hiring request?'))return;
-  const {error}=await sb.schema('hr').from('manpower_requests').delete().eq('id',id);
-  if(error){toast(error.message,'err');return;}
-  if(MP_RECORDS)MP_RECORDS=MP_RECORDS.filter(r=>r.id!==id);
-  toast('Deleted');mpRefreshList();
-};
-window.mpDelete=window.mpDeleteOne;
-window.mpReload=function(){MP_RECORDS=null;if(PAGE==='recruitment')renderPage();};
-
-/* ── ManPower: the AI-written JD, post text and creative ──
-   The generation itself is the manpower-ai-generate edge function: it reads the requisition, takes
-   up to three of our past Job Descriptions as style examples, and writes the JD, the shorter
-   job-board post text and a creative. It stores all three and stamps ai_status on the requisition.
-   Nothing was ever calling it, so this is the button. */
-function mpAiPanel(rec){
-  const st=rec.ai_status||'pending';
-  // The document is built from the JSON in the browser, so that - not the stored file - is what
-  // decides whether there is anything to show.
-  const hasJd=!!rec.ai_job_description_json;
-  const badge={pending:'<span class="tag t-gray">Not generated</span>',
-               generating:'<span class="tag t-blue"><i class="fa-solid fa-spinner fa-spin"></i> Writing…</span>',
-               ready:'<span class="tag t-green">Ready</span>',
-               failed:'<span class="tag t-red">Failed</span>'}[st]||'';
-  let inner;
-  if(st==='ready'&&hasJd){
-    inner='<div class="mp-ai-acts">'
-      +'<button class="btn btn-sm btn-primary" onclick="mpJdDownload('+rec.id+')"><i class="fa-solid fa-file-lines"></i> Job Description</button>'
-      +(rec.ai_creative_path
-        ? '<button class="btn btn-sm" onclick="mpCreativePng('+rec.id+')"><i class="fa-solid fa-image"></i> Creative</button>'
-        : '')
-      +'<button class="btn btn-sm" onclick="mpAiCopyPost('+rec.id+')"><i class="fa-solid fa-copy"></i> Copy post text</button>'
-      +'<button class="btn btn-sm" onclick="mpAiGenerate('+rec.id+',true)"><i class="fa-solid fa-rotate"></i> Rewrite</button>'
-      /* ADD IS WHAT PUTS IT IN THE LIBRARY. Nothing else does - not writing it, not approving the
-         hiring request. A description sits with its request until somebody decides it is good
-         enough to keep, which is the decision the old approval step was pretending to be. The
-         same button is in the email that announces the description, so it can be done from a
-         phone without opening JAIN-E. */
-      +'<span id="mpJdAddWrap'+rec.id+'"></span>'
-      +'</div>'
-      +(rec.ai_platform_post_text
-        ? '<div class="mp-ai-post"><div class="mp-ai-lbl">Post text — for LinkedIn, Naukri or Indeed</div>'
-          +'<div class="mp-ai-post-body" id="mpAiPost'+rec.id+'">'+esc(rec.ai_platform_post_text)+'</div></div>'
-        : '');
-  } else if(st==='generating'){
-    inner='<div class="mp-ai-note">Writing the Job Description now. It takes a few seconds — press Refresh when it settles.</div>'
-      +'<div class="mp-ai-acts"><button class="btn btn-sm" onclick="mpReload()"><i class="fa-solid fa-rotate"></i> Refresh</button></div>';
-  } else {
-    inner='<div class="mp-ai-note">'
-      +(st==='failed'
-        ? 'The last attempt failed. Trying again is safe — nothing was saved.'
-        : 'Writes a full Job Description in our house style, the shorter text for a job board, and a creative to post with it.')
-      +'</div>'
-      +'<div class="mp-ai-acts"><button class="btn btn-sm btn-primary" onclick="mpAiGenerate('+rec.id+')">'
-      +'<i class="fa-solid fa-wand-magic-sparkles"></i> '+(st==='failed'?'Try again':'Generate')+'</button></div>';
-  }
-  const html='<div class="mp-ai"><div class="mp-ai-hd"><i class="fa-solid fa-wand-magic-sparkles"></i> Job Description &amp; creative '+badge+'</div>'+inner+'</div>';
-  /* Whether this description is already in the library is a fact about the DESCRIPTION, held in
-     recruit.job_descriptions, not about the request - so it has to be looked up. Done after the
-     panel is on screen rather than before: the panel is drawn from data already in hand, and
-     holding it back for one more round trip would leave the whole request blank while it waited. */
-  if(st==='ready'&&hasJd) setTimeout(function(){ mpJdAddRefresh(rec.id); },0);
-  return html;
-}
-
-/* Draws the Add button, or says it is already added. Separate from mpAiPanel so pressing Add can
-   redraw just this one span instead of the whole request. */
-async function mpJdAddRefresh(reqId){
-  const host=$('mpJdAddWrap'+reqId); if(!host) return;
-  let jd=null;
-  try{
-    const {data}=await sb.schema('recruit').from('job_descriptions')
-      .select('id,in_library,added_by')
-      .eq('manpower_request_id',reqId).order('created_at',{ascending:false}).limit(1);
-    jd=(data||[])[0]||null;
-  }catch(_e){ return; }   // a failed lookup shows nothing rather than a button that cannot work
-  if(!jd){ host.innerHTML=''; return; }
-  host.innerHTML=jd.in_library
-    ? '<span class="tag t-green" title="'+esc(jd.added_by||'')+'"><i class="fa-solid fa-check"></i> In Descriptions</span>'
-    : '<button class="btn btn-sm btn-primary" id="mpJdAddBtn'+reqId+'" onclick="mpJdAdd('+reqId+',\''+esc(jd.id)+'\')">'
-      +'<i class="fa-solid fa-plus"></i> Add to Descriptions</button>';
-}
-
-window.mpJdAdd=async function(reqId,jdId){
-  if(!recGuard()) return;
-  const btn=$('mpJdAddBtn'+reqId);
-  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
-  try{
-    // .select() for the same reason as jdEditorSave: an update that row-level security filters
-    // out comes back as success with nothing changed, and a button that lies is worse than one
-    // that fails.
-    const {data,error}=await sb.schema('recruit').from('job_descriptions')
-      .update({in_library:true,added_by:state.email,added_at:new Date().toISOString()})
-      .eq('id',jdId).select('id');
-    if(error) throw new Error(error.message);
-    if(!data||!data.length) throw new Error('nothing changed — you may not have permission');
-    toast('Added — it is in Recruitment › Job Descriptions now','ok');
-    mpJdAddRefresh(reqId);
-  }catch(e){
-    toast('Could not add it: '+((e&&e.message)||e),'err');
-    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-plus"></i> Add to Descriptions'; }
-  }
-};
-
-window.mpAiCopyPost=function(id){
-  const rec=(MP_RECORDS||[]).find(function(r){return r.id===id;});
-  const txt=(rec&&rec.ai_platform_post_text)||'';
-  if(!txt){ toast('No post text yet','err'); return; }
-  // navigator.clipboard needs a secure context and can be refused; the textarea fallback works
-  // everywhere, so a copy never silently does nothing.
-  const done=function(){ toast('Post text copied','ok'); };
-  if(navigator.clipboard&&navigator.clipboard.writeText){
-    navigator.clipboard.writeText(txt).then(done,function(){ mpCopyFallback(txt,done); });
-  } else { mpCopyFallback(txt,done); }
-};
-function mpCopyFallback(txt,done){
-  const ta=document.createElement('textarea');
-  ta.value=txt; ta.style.position='fixed'; ta.style.top='-1000px';
-  document.body.appendChild(ta); ta.select();
-  try{ document.execCommand('copy'); done(); }
-  catch(e){ toast('Could not copy — select the text and copy it by hand','err'); }
-  document.body.removeChild(ta);
-}
-
-window.mpAiGenerate=async function(id,isRewrite){
-  if(!recGuard()) return;
-  if(isRewrite && !await confirmDialog(
-      'Rewrite the Job Description, post text and creative for this hiring request? The current ones are replaced.',
-      {title:'Rewrite', okLabel:'Rewrite', icon:'fa-rotate', danger:false})) return;
-  const rec=(MP_RECORDS||[]).find(function(r){return r.id===id;});
-  if(rec){ rec.ai_status='generating'; mpShowDetail(id); }
-  toast('Writing the Job Description…','ok');
-  try{
-    const {data,error}=await sb.functions.invoke('manpower-ai-generate',
-      {body:{request_id:id, requested_by:state.email}});
-    if(error) throw error;
-    if(data&&data.error) throw new Error(data.error);
-    toast('Job Description ready','ok');
-  }catch(e){
-    // The requisition's own ai_status is set to 'failed' by the function, so the reload below
-    // shows the real state rather than whatever this screen last guessed.
-    toast('Could not generate: '+((e&&e.message)||e),'err');
-  }
-  MP_RECORDS=null;
-  if(PAGE==='recruitment') await recManpower();
-  const still=$('mpDetail');
-  if(still) mpShowDetail(id);
-};
-
-/* The Job Description document, built in the browser.
-   It used to be an HTML file uploaded to public storage, and that can never work: Supabase serves
-   HTML out of a public bucket as text/plain on purpose (it stops a stored page running scripts on
-   the storage domain). The browser therefore showed the raw source - which is the "no CSS, opens
-   some Supabase code" everybody was seeing. Verified: that URL returns Content-Type: text/plain,
-   while the SVG creative beside it correctly returns image/svg+xml.
-   So the document is assembled here instead, from ai_job_description_json which is already stored
-   on the requisition. Print gives a PDF, Download gives a real file, and neither depends on how
-   storage chooses to serve a content type. */
-const JD_LOGO='https://rkxsgtauigjrpcjkmccu.supabase.co/storage/v1/object/public/recruitment-creatives/brand/jain-group-logo.webp';
-
-function mpJdDocHtml(rec){
-  const s=rec.ai_job_description_json||{};
-  const q=s.qualifications||{};
-  const li=function(arr){
-    return (Array.isArray(arr)&&arr.length)
-      ? '<ul>'+arr.map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul>' : '';
-  };
-  const resp=(s.responsibilities||[]).map(function(r){
-    return '<li>'+(r.label?'<b>'+esc(r.label)+'</b>: ':'')+esc(r.detail||'')+'</li>';
-  }).join('');
-  const qual=[];
-  if(q.education) qual.push('<p><b>Educational Background:</b> '+esc(q.education)+'</p>');
-  if(q.experience) qual.push('<p><b>Professional Experience:</b> '+esc(q.experience)+'</p>');
-  if(q.skills&&q.skills.length) qual.push('<p><b>Skills:</b></p>'+li(q.skills));
-  if(q.personal_attributes&&q.personal_attributes.length)
-    qual.push('<p><b>Personal Attributes:</b></p>'+li(q.personal_attributes));
-
-  return '<!doctype html><html><head><meta charset="utf-8">'
-    +'<title>'+esc(s.job_title||rec.job_title||'Job Description')+' — Jain Group</title>'
-    +'<style>'
-      +'@page{margin:18mm 16mm}'
-      +'*{box-sizing:border-box}'
-      +'body{font-family:Inter,"Segoe UI",Arial,sans-serif;color:#111;max-width:820px;margin:0 auto;padding:44px 52px;line-height:1.6}'
-      +'.lh{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;'
-        +'border-bottom:3px solid #D21F3C;padding-bottom:16px;margin-bottom:26px}'
-      +'.lh img{height:42px}'
-      +'h1{font-size:23px;margin:0 0 3px;letter-spacing:-.2px}'
-      +'.dept{color:#555;font-size:14px}'
-      +'h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:#D21F3C;'
-        +'border-bottom:1px solid #eee;padding-bottom:5px;margin:26px 0 10px}'
-      +'p,li{font-size:14px}'
-      +'ul{margin:4px 0 4px;padding-left:20px}'
-      +'li{margin-bottom:4px}'
-      +'.foot{margin-top:38px;padding-top:13px;border-top:1px solid #eee;font-size:11.5px;color:#888}'
-      /* the print button is for the person reading it on screen and must never appear on paper */
-      +'.noprint{position:fixed;top:14px;right:14px}'
-      +'.noprint button{font:600 13px Inter,Arial,sans-serif;padding:9px 15px;border-radius:8px;'
-        +'border:0;background:#D21F3C;color:#fff;cursor:pointer}'
-      +'@media print{.noprint{display:none}body{padding:0}}'
-    +'</style></head><body>'
-    +'<div class="noprint"><button onclick="window.print()">Print / Save as PDF</button></div>'
-    +'<div class="lh"><div><h1>'+esc(s.job_title||rec.job_title||'')+'</h1>'
-      +'<div class="dept">'+esc(s.department||rec.department||'')+'</div></div>'
-      +'<img src="'+JD_LOGO+'" alt="Jain Group"></div>'
-    +'<h2>Job Summary</h2><p>'+esc(s.job_summary||'')+'</p>'
-    +(resp?'<h2>Key Responsibilities</h2><ul>'+resp+'</ul>':'')
-    +(qual.length?'<h2>Required Qualifications</h2>'+qual.join(''):'')
-    +(s.compensation?'<h2>Compensation and Benefits</h2><p>'+esc(s.compensation)+'</p>':'')
-    +'<div class="foot">Jain Group — Caring for your dreams. '
-      +esc([rec.location?'Location: '+rec.location:'',
-            rec.no_of_vacancy?'Vacancies: '+rec.no_of_vacancy:''].filter(Boolean).join(' · '))
-      +'</div></body></html>';
-}
-
-function mpJdRec(id){
-  const rec=(MP_RECORDS||[]).find(function(r){return r.id===id;});
-  if(!rec||!rec.ai_job_description_json){ toast('No Job Description generated yet','err'); return null; }
-  return rec;
-}
-
-/* Last resort only. The Job Description is a download, not something that opens in a tab - but if
-   the browser refuses the blob download there has to be some way to get at the document, so it is
-   opened instead and the print dialog offered. */
-function mpJdOpenFallback(rec){
-  const w=window.open('','_blank');
-  if(!w) return false;
-  w.document.open(); w.document.write(mpJdDocHtml(rec)); w.document.close();
-  return true;
-}
-
-// Saves a real file. A Blob URL downloads whatever the server would have argued about.
-window.mpJdDownload=function(id){
-  const rec=mpJdRec(id); if(!rec) return;
-  if(!('download' in document.createElement('a'))){
-    if(!mpJdOpenFallback(rec)) toast('Your browser will not download it — allow pop-ups for JAIN-E','err');
-    return;
-  }
-  const name=String((rec.ai_job_description_json.job_title||rec.job_title||'Job Description'))
-    .replace(/[^A-Za-z0-9 .()-]/g,'').trim().replace(/\s+/g,'_');
-  const blob=new Blob([mpJdDocHtml(rec)],{type:'text/html;charset=utf-8'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url; a.download=(name||'Job_Description')+' — Jain Group.html';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  setTimeout(function(){ URL.revokeObjectURL(url); },4000);
-  toast('Downloaded','ok');
-};
-
-/* The creative is stored as SVG - text stays crisp at any size and the poster can be re-rendered
-   from it - but what anybody actually posts to LinkedIn or WhatsApp is a PNG. The conversion runs
-   here rather than on the server: rasterising in Deno would mean adding an image library, whereas
-   the browser already has one.
-   The SVG is fetched as TEXT and handed back as a same-origin blob. Pointing an <img> at the
-   storage URL directly would taint the canvas and toBlob() would then be refused - the file is
-   cross-origin even though storage does send permissive CORS headers. */
-window.mpCreativePng=async function(id){
-  const rec=(MP_RECORDS||[]).find(function(r){return r.id===id;});
-  if(!rec||!rec.ai_creative_path){ toast('No creative generated yet','err'); return; }
-  const btn=event&&event.currentTarget;
-  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Building…'; }
-  let url=null;
-  try{
-    const res=await fetch(rec.ai_creative_path,{cache:'no-store'});
-    if(!res.ok) throw new Error('could not read the creative ('+res.status+')');
-    const svg=await res.text();
-    url=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml;charset=utf-8'}));
-    const img=new Image();
-    await new Promise(function(ok,bad){
-      img.onload=ok;
-      img.onerror=function(){ bad(new Error('the creative would not render')); };
-      img.src=url;
-    });
-    // 1122x1402 is the artwork's own size, so this is a straight one-to-one raster, no resampling.
-    const c=document.createElement('canvas'); c.width=1122; c.height=1402;
-    const g=c.getContext('2d');
-    g.drawImage(img,0,0,c.width,c.height);
-    const blob=await new Promise(function(r){ c.toBlob(r,'image/png'); });
-    if(!blob) throw new Error('the browser would not produce a PNG');
-    const name=String(rec.job_title||'Hiring').replace(/[^A-Za-z0-9 ()-]/g,'').trim().replace(/\s+/g,'_');
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download=(name||'Hiring')+' - We Are Hiring.png';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(function(){ URL.revokeObjectURL(a.href); },4000);
-    toast('PNG downloaded','ok');
-  }catch(e){
-    toast('Could not make the PNG: '+((e&&e.message)||e),'err');
-  }finally{
-    if(url) URL.revokeObjectURL(url);
-    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-image"></i> Creative'; }
-  }
-};
-
-/* ── Referrals ──
-   Anyone signed in may refer somebody for an open position. A referral submitted by HR, the
-   Administrator or Management is approved on the way in (hr.submission_self_approves); everyone
-   else's waits for HR.
-   A referral is recorded HERE AND NOWHERE ELSE - it does not create a candidate and does not appear
-   in the Interview Tracker or in any Monthly Update column. Somebody has to pick it up deliberately. */
-let REF_RECORDS=null, REF_POSITIONS=null;
-
-async function recReferrals(){
-  const b=$('recBody');
-  if(!REF_RECORDS){
-    b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
-    try{
-      const q=await sb.schema('hr').from('referrals').select('*').order('created_at',{ascending:false});
-      if(q.error) throw q.error;
-      REF_RECORDS=q.data||[];
-    }catch(e){
-      b.innerHTML='<div class="empty" style="padding:40px;color:var(--err)">'+esc(e.message||String(e))+'</div>';
-      return;
-    }
-  }
-  const rows=REF_RECORDS;
-  const mine=rows.filter(function(r){return (r.referred_by||'').toLowerCase()===(state.email||'').toLowerCase();}).length;
-  const waiting=rows.filter(function(r){return (r.approval_status||'Pending')==='Pending';}).length;
-  const canDecide=hrCan();
-
-  const stTag=function(r){
-    const s=r.approval_status||'Pending';
-    if(s==='Approved') return '<span class="tag t-green" title="'+esc('Approved by '+(r.approved_by||'—'))+'">Approved</span>';
-    if(s==='Rejected') return '<span class="tag t-red" title="'+esc(r.rejection_reason||'')+'">Rejected</span>';
-    return '<span class="tag t-amber">Waiting for HR</span>';
-  };
-
-  b.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">'
-      +'<div class="sec-title" style="margin:0">Referrals <span class="tag t-gray" style="margin-left:4px">'+rows.length+'</span>'
-        +(waiting?' <span class="tag t-amber" style="margin-left:4px">'+waiting+' waiting</span>':'')+'</div>'
-      +'<div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">'
-        +'<button class="btn btn-primary" onclick="refForm()"><i class="fa-solid fa-user-plus"></i> Refer someone</button>'
-      +'</div>'
-    +'</div>'
-    +'<div class="ref-note"><i class="fa-solid fa-circle-info"></i> '
-      +'A referral is kept here only. It does not create a candidate and is not counted in the Interview Tracker '
-      +'or the Monthly Update until someone takes it forward.'
-      +(mine?' You have referred '+mine+' '+(mine===1?'person':'people')+'.':'')
-    +'</div>'
-    +(rows.length
-      ? '<div class="card" style="overflow:hidden"><div style="overflow-x:auto"><table class="tbl">'
-        +'<thead><tr><th>Name</th><th>Position</th><th>Phone</th><th>Email</th>'
-          +'<th>Referred by</th><th>When</th><th>Status</th>'+(canDecide?'<th></th>':'')+'</tr></thead><tbody>'
-        +rows.map(function(r){
-          const pend=(r.approval_status||'Pending')==='Pending';
-          return '<tr>'
-            +'<td style="font-weight:600">'+esc(r.referred_name||'—')+'</td>'
-            +'<td>'+esc(r.position||'—')+'</td>'
-            +'<td style="white-space:nowrap">'+esc(r.referred_phone||'—')+'</td>'
-            +'<td style="font-size:12px">'+esc(r.referred_email||'—')+'</td>'
-            +'<td style="font-size:12px;color:var(--slate)">'+esc(r.referred_by||'—')+'</td>'
-            +'<td style="white-space:nowrap;font-size:12px;color:var(--slate)">'+esc(refWhen(r.created_at))+'</td>'
-            +'<td>'+stTag(r)+'</td>'
-            +(canDecide
-              ? '<td style="white-space:nowrap">'
-                +(pend
-                  ? '<button class="btn btn-sm btn-ok" onclick="refDecide('+r.id+',true)"><i class="fa-solid fa-check"></i> Approve</button> '
-                    +'<button class="btn btn-sm btn-danger" onclick="refDecide('+r.id+',false)"><i class="fa-solid fa-xmark"></i> Reject</button>'
-                  : '<button class="btn btn-sm btn-danger" onclick="refDelete('+r.id+')" title="Delete this referral"><i class="fa-solid fa-trash"></i></button>')
-                +'</td>'
-              : '')
-            +'</tr>';
-        }).join('')
-        +'</tbody></table></div></div>'
-      : '<div class="card card-pad empty"><i class="fa-solid fa-user-plus"></i>'
-        +'<div style="font-weight:600;color:var(--ink)">No referrals yet</div>'
-        +'<p style="max-width:400px;margin:6px auto 0">Know somebody good for an open role? Click <b>Refer someone</b>.</p></div>');
-}
-
-function refWhen(ts){
-  if(!ts) return '—';
-  try{ return new Date(ts).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); }
-  catch(e){ return String(ts); }
-}
-
-window.refForm=async function(){
-  if(!REF_POSITIONS){
-    try{
-      const {data}=await sb.schema('hr').rpc('open_positions');
-      REF_POSITIONS=data||[];
-    }catch(e){ REF_POSITIONS=[]; }
-  }
-  const opts=REF_POSITIONS.map(function(p){
-    return '<option value="'+p.manpower_id+'">'+esc(p.job_title+(p.department?' — '+p.department:''))+'</option>';
-  }).join('');
-  const selfAppr=hrCan();
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-user-plus"></i> Refer someone</h3>'
-      +'<span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body frm">'
-      +'<div><label>Their name *</label><input id="refFName" class="inp" placeholder="Full name"></div>'
-      +'<div class="two">'
-        +'<div><label>Phone</label><input id="refFPhone" class="inp" placeholder="10-digit mobile"></div>'
-        +'<div><label>Email</label><input id="refFEmail" class="inp" type="email" placeholder="name@example.com"></div>'
-      +'</div>'
-      +'<div><label>Position *</label><select id="refFPos" class="sel">'
-        +(opts?'<option value="">— Choose an open position —</option>'+opts
-              :'<option value="">No open positions right now</option>')
-        +'</select></div>'
-      +'<div><label>Anything we should know</label>'
-        +'<textarea id="refFNotes" class="inp" rows="3" placeholder="How you know them, what they do now, why they would suit it"></textarea></div>'
-      +'<div style="font-size:12.5px;color:var(--slate);margin-top:4px">'
-        +(selfAppr
-          ? 'You are in HR or Management, so this is approved as soon as you submit it.'
-          : 'HR will see this and approve or reject it.')
-      +'</div>'
-    +'</div>'
-    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
-      +'<button class="btn btn-primary" id="refSaveBtn" onclick="refSave()"><i class="fa-solid fa-check"></i> Submit</button></div>');
-  setTimeout(function(){ const el=$('refFName'); if(el) el.focus(); },50);
-};
-
-window.refSave=async function(){
-  const name=(($('refFName')||{}).value||'').trim();
-  const posId=(($('refFPos')||{}).value||'').trim();
-  const phone=(($('refFPhone')||{}).value||'').trim();
-  const email=(($('refFEmail')||{}).value||'').trim();
-  if(!name){ toast('Enter their name','err'); return; }
-  if(!posId){ toast('Choose the position','err'); return; }
-  if(!phone&&!email){ toast('Give a phone number or an email — otherwise nobody can reach them','err'); return; }
-  const pos=(REF_POSITIONS||[]).find(function(p){return String(p.manpower_id)===posId;});
-  const btn=$('refSaveBtn');
-  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
-  const {error}=await sb.schema('hr').from('referrals').insert({
-    referred_name:name, referred_phone:phone||null, referred_email:email||null,
-    position:(pos&&pos.job_title)||null, manpower_request_id:parseInt(posId,10),
-    referred_by:state.email, notes:(($('refFNotes')||{}).value||'').trim()||null
-  });
-  if(error){
-    toast(error.message,'err');
-    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i> Submit'; }
-    return;
-  }
-  closeModal();
-  toast(hrCan()?'Referral added and approved':'Referral sent to HR','ok');
-  REF_RECORDS=null; recReferrals();
-};
-
-window.refDecide=async function(id,ok){
-  if(!hrCan()){ toast('Only HR can approve a referral','err'); return; }
-  const r=(REF_RECORDS||[]).find(function(x){return x.id===id;})||{};
-  const who=r.referred_name||'this referral';
-  if(!await confirmDialog((ok?'Approve the referral for ':'Reject the referral for ')+'“'+who+'”?',
-      ok ? {title:'Approve referral', okLabel:'Approve', icon:'fa-circle-check', danger:false}
-         : {title:'Reject referral',  okLabel:'Reject',  icon:'fa-circle-xmark', danger:true})) return;
-  const {error}=await sb.schema('hr').from('referrals').update({
-    approval_status: ok?'Approved':'Rejected',
-    approved_by: state.email,
-    approved_at: new Date().toISOString()
-  }).eq('id',id);
-  if(error){ toast(error.message,'err'); return; }
-  toast(ok?'Approved':'Rejected','ok');
-  REF_RECORDS=null; recReferrals();
-};
-
-window.refDelete=async function(id){
-  if(!hrCan()){ toast('Only HR can delete a referral','err'); return; }
-  const r=(REF_RECORDS||[]).find(function(x){return x.id===id;})||{};
-  if(!await confirmDialog(
-      'Delete the referral for “'+(r.referred_name||'this person')+'”? The candidate it '
-      +'created is deleted as well, along with their CV. This cannot be undone.',
-      {title:'Delete referral', okLabel:'Delete', icon:'fa-trash', danger:true})) return;
-  /* Through the same function the other screen uses. This one used to delete the row straight
-     out of the table, which left the candidate behind and skipped the rule entirely. */
-  const {data,error}=await sb.schema('hr').rpc('referral_withdraw',{p_id:id});
-  if(error){ toast(error.message,'err'); return; }
-  await hrRemoveFiles(data);
-  toast('Referral deleted \u2014 the candidate was removed too','ok');
-  REF_RECORDS=null; recReferrals();
-};
-
-window.refReload=function(){ REF_RECORDS=null; REF_POSITIONS=null; if(PAGE==='recruitment')renderPage(); };
 
 async function recLoadJDs(v){
   REC_SEL=new Set();

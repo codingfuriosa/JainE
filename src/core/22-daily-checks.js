@@ -1130,11 +1130,13 @@ VIEWS.gtd=function(v,seg){
    "Qualified Leads" Google Sheet. See 23b-crm-qualified.js. */
 VIEWS.crm=function(v,seg){
   setCrumb(['Sales','CRM & Sales']);
-  const ql=seg&&seg[0]==='qualified';
+  // 23 Nov 2026: a third tab, Performance Report - see 23c-crm-performance.js
+  const po=crmPerfOnly(), ql=!po&&seg&&seg[0]==='qualified', pf=po||(seg&&seg[0]==='performance');
   v.innerHTML=mHead('fa-handshake','#7c3aed','CRM & Sales')
-    +'<div style="margin:-8px 0 12px"><button class="btn btn-primary" onclick="window.open(\'https://www.realtybucket.com/\',\'_blank\')"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open</button></div>'
-    +'<div class="tabs" style="margin-top:14px"><div class="tab'+(ql?'':' active')+'" onclick="navTo(\'crm\')"><i class="fa-regular fa-chart-bar"></i> Daily Updates</div><div class="tab'+(ql?' active':'')+'" onclick="navTo(\'crm/qualified\')"><i class="fa-solid fa-user-check"></i> Qualified Leads</div></div>'
-    +(ql?CQ_CSS+'<div style="margin-top:16px"><div id="cqWrap"><div class="loader"><div class="spin"></div></div></div></div>'
+    +(po?'':'<div style="margin:-8px 0 12px"><button class="btn btn-primary" onclick="window.open(\'https://www.realtybucket.com/\',\'_blank\')"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open</button></div>')
+    +'<div class="tabs" style="margin-top:14px'+(po?';display:none':'')+'"><div class="tab'+(ql||pf?'':' active')+'" onclick="navTo(\'crm\')"><i class="fa-regular fa-chart-bar"></i> Daily Updates</div><div class="tab'+(ql?' active':'')+'" onclick="navTo(\'crm/qualified\')"><i class="fa-solid fa-user-check"></i> Qualified Leads</div><div class="tab'+(pf?' active':'')+'" onclick="navTo(\'crm/performance\')"><i class="fa-solid fa-ranking-star"></i> Performance Report</div></div>'
+    +(pf?CQ_CSS+CP_CSS+'<div style="margin-top:16px"><div id="cpWrap"><div class="loader"><div class="spin"></div></div></div></div>'
+      :ql?CQ_CSS+'<div style="margin-top:16px"><div id="cqWrap"><div class="loader"><div class="spin"></div></div></div></div>'
         :'<div style="margin-top:16px"><div id="crmDuWrap"><div class="loader"><div class="spin"></div></div></div></div>');
-  if(ql) cqLoad(); else crmDuLoad();
+  if(pf) cpLoad(); else if(ql) cqLoad(); else crmDuLoad();
 };

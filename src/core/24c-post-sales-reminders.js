@@ -237,16 +237,16 @@ window.prmList=function(){
 };
 function prmEmailHtml(subj,body,to){
   const st=PRM.settings||{};
-  return '<div style="color:var(--slate);font-size:12.5px;line-height:1.75"><b>From</b> Riya Roy - The Jain Group &lt;customercare2@thejaingroup.com&gt;'
+  return '<div style="color:var(--slate);font-size:12.5px;line-height:1.75;overflow-wrap:anywhere"><b>From</b> The Jain Group &lt;customercare2@thejaingroup.com&gt;'
       +(to!=null?'<br><b>To</b> '+esc(to||'(no email)'):'')+'<br><b>Subject</b> '+esc(subj)
       +'<br><b>Attachment</b> Reminder Letter (PDF)'+(st.attachment_name?', '+esc(st.attachment_name):'')+'</div>'
-    +'<div style="margin-top:12px;padding:16px;border:1px solid var(--line);border-radius:12px;white-space:pre-wrap;line-height:1.65;font-size:13.5px">'+esc(body)+'</div>';
+    +'<div style="margin-top:12px;padding:16px;border:1px solid var(--line);border-radius:12px;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;line-height:1.65;font-size:13.5px">'+esc(body)+'</div>';
 }
 window.prmPreview=function(ix){
   const r=PRM.rows[ix]; if(!r) return;
   const st=PRM.settings||{};
   openModal('<div class="modal-head"><h3><i class="fa-solid fa-envelope-open-text"></i> '+esc(String(r.customer_name||'').trim())+' - preview, not sent</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="width:min(94vw,660px)">'+prmEmailHtml(prmFill(st.subject,r),prmFill(st.body,r),r.email)+'</div>'
+    +'<div class="modal-body" style="width:min(94vw,660px);max-width:100%;box-sizing:border-box;overflow-x:hidden">'+prmEmailHtml(prmFill(st.subject,r),prmFill(st.body,r),r.email)+'</div>'
     +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>','md');
 };
 window.prmHold=async function(ix){
@@ -280,7 +280,7 @@ function prmSelBar(){
     +'<button class="btn btn-sm" onclick="prmSelShown(true)">Select all shown</button>'
     +'<button class="btn btn-sm" onclick="prmSelShown(false)">Unselect all shown</button>'
     +(sel.length?'<button class="btn btn-sm" onclick="PRM.sel.clear();prmList()">Clear selection</button>':'')
-    +'<button class="btn btn-sm" style="margin-left:auto"'+(sel.length&&PRM.sched?'':' disabled title="'+(PRM.sched?'Tick customers to schedule':'Scheduling is ready from 8 PM tonight')+'"')+' onclick="prmSchedAsk()"><i class="fa-regular fa-clock"></i> Schedule'+(sel.length?' ('+sel.length+')':'')+'</button>'
+    +'<button class="btn btn-sm" style="margin-left:auto"'+(sel.length&&PRM.sched?'':' disabled title="'+(PRM.sched?'Tick customers to schedule':'Scheduling is ready from 8 PM tonight')+'"')+' onclick="prmSchedAsk(event)"><i class="fa-regular fa-clock"></i> Schedule'+(sel.length?' ('+sel.length+')':'')+'</button>'
     +'<button class="btn btn-sm"'+(sel.length&&sel.length<=5?'':' disabled title="Tick 1 to 5 customers to test with"')+' onclick="prmTestAsk()"><i class="fa-solid fa-flask"></i> Send test'+(sel.length&&sel.length<=5?' ('+sel.length+')':'')+'</button>'
     +'<button class="btn btn-sm btn-primary"'+(sel.length?'':' disabled')+' onclick="prmSendAsk()"><i class="fa-solid fa-paper-plane"></i> Send reminder'+(sel.length?' to '+sel.length:'')+'</button>';
 }
@@ -590,35 +590,47 @@ function prmSchedNext(s){
     if(ok) return dd.toISOString().slice(0,10); }
   return null;
 }
-window.prmSchedAsk=function(){
+/* SCHEDULE = THE ACCOUNTABILITY DATE PICKER, AS ITS OWN DROPDOWN (25 Nov 2026, Ayush: "why is it opening in a popup - it will be a normal date picker like it opens in Accountability"):
+   the Schedule button opens the picker right under itself, as a task's due date does - Every day, Weekly, Fortnightly, Monthly - and Done saves it for the ticked customers. */
+function prmDpClose(){
+  const el=document.getElementById('prmDpPop'); if(el) el.remove();
+  if(PRM._dpOut){ document.removeEventListener('mousedown',PRM._dpOut,true); PRM._dpOut=null; }
+  window.removeEventListener('resize',prmDpClose);
+}
+window.prmSchedAsk=async function(ev){
+  if(ev&&ev.stopPropagation) ev.stopPropagation();
+  const btn=(ev&&ev.currentTarget)||null;
+  if(document.getElementById('prmDpPop')){ prmDpClose(); return; }
   const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)&&prmPick(r)); if(!sel.length||!PRM.sched) return;
-  const now=new Date(Date.now()+5.5*3600e3), dow=((now.getUTCDay()+6)%7)+1, dom=now.getUTCDate();
-  openModal('<div class="modal-head"><h3><i class="fa-regular fa-clock"></i> Schedule reminders</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="width:min(94vw,520px);font-size:13.5px;line-height:1.7">'
-      +'<b>'+sel.length+'</b> customer'+(sel.length===1?'':'s')+': '+sel.slice(0,6).map(r=>esc(prmName(r))).join(', ')+(sel.length>6?' and '+(sel.length-6)+' more':'')
-      +'<div style="margin-top:12px;font-weight:700">How often</div>'
-      +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">'+[['daily','Daily'],['weekly','Weekly'],['fortnightly','Fortnightly'],['monthly','Monthly']].map((f,i)=>'<label class="prm-chip'+(i===1?' on':'')+'" style="display:inline-flex;align-items:center;gap:6px"><input type="radio" name="prmFreq" value="'+f[0]+'"'+(i===1?' checked':'')+' onchange="prmSchedFreq()" style="display:none">'+f[1]+'</label>').join('')+'</div>'
-      +'<div id="prmSchedWd" style="margin-top:10px">On <select id="prmSchedDow" class="sel" style="height:34px;margin-left:6px">'+PRM_DOW.slice(1).map((d,i)=>'<option value="'+(i+1)+'"'+(i+1===dow?' selected':'')+'>'+d+'</option>').join('')+'</select></div>'
-      +'<div id="prmSchedMd" style="margin-top:10px;display:none">On the <select id="prmSchedDom" class="sel" style="height:34px;margin:0 6px">'+Array.from({length:31},(_,i)=>'<option value="'+(i+1)+'"'+(i+1===dom?' selected':'')+'>'+prmOrd(i+1)+'</option>').join('')+'</select>of each month</div>'
-      +'<div style="font-size:12px;color:var(--slate);margin-top:12px">Each reminder goes <b>15 minutes after that day’s Farvision import</b> is complete, from Riya Roy - The Jain Group &lt;customercare2@thejaingroup.com&gt;, with the customer’s Reminder Letter. If there is no import that day, it does not go that day. Held, paid-up or already-reminded-that-day customers are skipped. You can still send to them by hand any time.</div>'
-    +'</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="prmSchedGo" onclick="prmSchedSave()"><i class="fa-regular fa-clock"></i> Schedule '+sel.length+'</button></div>','md');
-  prmSchedFreq();
+  // the date picker lives in Accountability's script (not on this page): load it first
+  if(typeof window.accDpMount!=='function'&&typeof ensurePageScript==='function'){ try{ await ensurePageScript('tasks'); }catch(e){} }
+  if(typeof window.accDpMount!=='function'){ toast('The date picker is still loading - try again in a moment','err'); return; }
+  const now=new Date(Date.now()+5.5*3600e3), dom=now.getUTCDate();
+  const el=document.createElement('div'); el.id='prmDpPop'; el.style.cssText='position:fixed;z-index:100000;top:0;left:0;visibility:hidden';
+  el.innerHTML='<div id="prmDpBox"></div>'; document.body.appendChild(el);
+  window.accDpMount($('prmDpBox'),null,{footer:true,plain:true,freqs:['daily','weekly','fortnightly','monthly'],freq:'weekly',dow:now.getUTCDay(),dom:dom,
+    onDone:function(r){ if(!r){ prmDpClose(); return; } prmSchedSave(r); }});
+  // under the button (above it when there is no room), kept inside the window - placed again once it has its real size
+  const place=function(){ const m=8, vw=document.documentElement.clientWidth, vh=window.innerHeight, q=el.getBoundingClientRect(), w=q.width, h=q.height, r=btn?btn.getBoundingClientRect():{left:m,right:m,top:80,bottom:80};
+    let top=r.bottom+4; if(top+h>vh-m) top=r.top-h-4; if(top<m) top=m;
+    el.style.top=top+'px'; el.style.left=Math.max(m,Math.min(r.right-w,vw-w-m))+'px'; el.style.visibility='visible'; };
+  place(); requestAnimationFrame(place); setTimeout(place,120);
+  PRM._dpOut=function(e){ if(el.contains(e.target)||(btn&&btn.contains(e.target))) return; prmDpClose(); };
+  setTimeout(function(){ document.addEventListener('mousedown',PRM._dpOut,true); },0);
+  window.addEventListener('resize',prmDpClose);
 };
-window.prmSchedFreq=function(){
-  const f=(document.querySelector('input[name=prmFreq]:checked')||{}).value;
-  document.querySelectorAll('input[name=prmFreq]').forEach(x=>x.parentNode.classList.toggle('on',x.checked));
-  $('prmSchedWd').style.display=(f==='weekly'||f==='fortnightly')?'':'none'; $('prmSchedMd').style.display=f==='monthly'?'':'none';
-};
-window.prmSchedSave=async function(){
-  const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)&&prmPick(r)); if(!sel.length) return;
-  const f=(document.querySelector('input[name=prmFreq]:checked')||{}).value||'weekly';
-  const wd=Number($('prmSchedDow').value), md=Number($('prmSchedDom').value);
-  const go=$('prmSchedGo'); if(go){ go.disabled=true; go.textContent='Saving…'; }
+window.prmSchedSave=async function(res){
+  const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)&&prmPick(r)); if(!sel.length){ prmDpClose(); return; }
+  const pk=res&&res.recur; if(!pk){ toast('Choose how often','err'); return; }
+  const f=pk.freq, wd=pk.weekdays&&pk.weekdays.length?(pk.weekdays[0]===0?7:pk.weekdays[0]):null, md=pk.monthdays&&pk.monthdays.length?(pk.monthdays[0]==='last'?31:Number(pk.monthdays[0])):null;
+  // the first fortnightly day the picker offered (it decides which weeks count); every other schedule starts today
+  const today=new Date(Date.now()+5.5*3600e3).toISOString().slice(0,10), start=f==='fortnightly'&&pk.start?pk.start:today;
+  const done=document.querySelector('#prmDpPop .dp-done'); if(done){ done.disabled=true; done.textContent='Saving…'; }
   const rows=sel.map(r=>({booking_no:r.booking_no,customer_name:String(r.customer_name||'').trim(),project:prmProj(r.project),frequency:f,
-    weekday:(f==='weekly'||f==='fortnightly')?wd:null,month_day:f==='monthly'?md:null,active:true,created_by:state.email,updated_at:new Date().toISOString()}));
+    weekday:(f==='weekly'||f==='fortnightly')?wd:null,month_day:f==='monthly'?md:null,start_date:start,active:true,created_by:state.email,updated_at:new Date().toISOString()}));
   const {error}=await sb.schema('postsales').from('reminder_schedules').upsert(rows,{onConflict:'booking_no'});
-  if(error){ toast(error.message,'err'); if(go){ go.disabled=false; go.textContent='Schedule'; } return; }
-  closeModal(); toast(sel.length+' customer'+(sel.length===1?'':'s')+' scheduled','ok'); PRM.sel.clear(); await prmSchedRead(); prmDraw();
+  if(error){ toast(error.message,'err'); if(done){ done.disabled=false; done.textContent='Done'; } return; }
+  prmDpClose(); toast(sel.length+' customer'+(sel.length===1?'':'s')+' scheduled','ok'); PRM.sel.clear(); await prmSchedRead(); prmDraw();
 };
 window.prmSchedDraw=function(){
   const host=$('prmSched'); if(!host) return;

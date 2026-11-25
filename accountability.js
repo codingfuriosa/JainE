@@ -13280,7 +13280,9 @@
   window.ivIsStale=function(ivId){
     const v=(window._ivInfo||{})[ivId];
     if(!v||!v.scheduled_at||v.decision) return false;
-    return (Date.now()-new Date(v.scheduled_at).getTime()) > 24*3600*1000;
+    // Offered as soon as the interview time has passed (was: 24 hours after) - 23 Nov 2026, so a
+    // missed interview can be moved the same day; the overdue email points people here too.
+    return Date.now() > new Date(v.scheduled_at).getTime();
   };
 
   /* MOVING ONE, rather than cancelling it and booking another. It is the same conversation on a
@@ -16532,7 +16534,7 @@
     }
     else if(a==='nothing'){
       h+=dpAskLbl('Every day')
-        +'<div class="dp-note">Nothing to choose &mdash; it comes back every day.<br><br>The first one is due today.</div>';
+        +(DP_OPTS.plain?'<div class="dp-note">Nothing to choose &mdash; it goes every day.</div>':'<div class="dp-note">Nothing to choose &mdash; it comes back every day.<br><br>The first one is due today.</div>');
     }
     else if(a==='weekdays'){
       h+=dpAskLbl('Which day',true)+'<div class="dp-chips dow">';
@@ -16541,7 +16543,7 @@
           +' data-dp="dow" data-v="'+i+'" title="'+DP_DOWL[i]+'">'+DP_DOW[i]+'</button>';
       h+='</div><div class="dp-note" style="margin-top:9px">'+(DP_ST.freq==='fortnightly'
         ?'Every other week, counted from the first one.'
-        :'One day a week. Twice a week is two recurring tasks.')+'</div>'+dpStartHtml(DP_ST);
+        :(DP_OPTS.plain?'One day a week.':'One day a week. Twice a week is two recurring tasks.'))+'</div>'+dpStartHtml(DP_ST);
     }
     else if(a==='monthdays'){
       h+=dpAskLbl('Which date',true)+'<div class="dp-chips dom">';
@@ -16592,10 +16594,10 @@
          : 'A 29th, 30th or 31st falls on the last day of a shorter month.')+'</div>';
     if(DP_ST.freq==='quarterly') h+='<div class="warn"><i class="fa-solid fa-circle-info"></i> '
       +'Every 3 months, counting from the first one.</div>';
-    if(DP_ST.freq!=='none') h+='<div class="warn"><i class="fa-solid fa-circle-info"></i> '
+    if(DP_ST.freq!=='none'&&!DP_OPTS.plain) h+='<div class="warn"><i class="fa-solid fa-circle-info"></i> '
       +'The next one is only created once this one is complete. Left open past the next date, '
       +'everyone on it gets a reminder email instead.</div>';
-    if(DP_ST.freq!=='none'){
+    if(DP_ST.freq!=='none'&&!DP_OPTS.plain){
       h+='<div class="ends">'+(DP_ST.until
         ? 'Ends '+dpShort(DP_ST.until)+' &middot; <button type="button" data-dp="noend">remove</button>'
         : '<button type="button" data-dp="setend">Set an end date</button>')+'</div>';
@@ -16634,7 +16636,7 @@
 
   function dpPaint(){
     if(!DP_HOST) return;
-    var railH='<div class="dp-rail">'+DP_FREQS.filter(function(f){ return !f.hidden||DP_ST.freq===f.k; }).map(function(f){
+    var railH='<div class="dp-rail">'+DP_FREQS.filter(function(f){ return DP_OPTS.freqs?DP_OPTS.freqs.indexOf(f.k)>-1:(!f.hidden||DP_ST.freq===f.k); }).map(function(f){
       return '<button type="button" class="dp-opt'+(DP_ST.freq===f.k?' on':'')+'" data-dp="freq" data-v="'+f.k+'">'+f.label+'</button>';
     }).join('')+'</div>';
     var h='<div class="dp-body">'+railH+dpPane()+'</div>'+dpSays();
@@ -16718,6 +16720,11 @@
       DP_ST.freq='none';
       DP_ST.date=(cur&&cur.due)||dpFloor();
     }
+    /* A caller can limit the choices (opts.freqs) and give the day to start from (opts.dow 0-6, opts.dom 1-31): the Reminders page's Schedule uses this (25 Nov 2026) with Daily, Weekly, Fortnightly and Monthly only. */
+    if(DP_OPTS.freqs&&DP_OPTS.freqs.indexOf(DP_ST.freq)<0) DP_ST.freq=DP_OPTS.freq&&DP_OPTS.freqs.indexOf(DP_OPTS.freq)>-1?DP_OPTS.freq:DP_OPTS.freqs[0];
+    if(DP_OPTS.freq&&!(recur&&recur.freq)&&(!DP_OPTS.freqs||DP_OPTS.freqs.indexOf(DP_OPTS.freq)>-1)) DP_ST.freq=DP_OPTS.freq;
+    if(!DP_ST.weekdays.length&&DP_OPTS.dow!=null) DP_ST.weekdays=[DP_OPTS.dow];
+    if(!DP_ST.monthdays.length&&DP_OPTS.dom!=null) DP_ST.monthdays=[DP_OPTS.dom];
     // Never open on a month already behind today, or every day in view is greyed out.
     var start=(DP_ST.date&&DP_ST.date>=dpFloor())?DP_ST.date:dpFloor();
     var p=dpParse(start);
@@ -16744,6 +16751,7 @@
     el.style.left=Math.max(m,Math.min(r.left,vw-w-m))+'px';
   }
 
+  window.accDpMount=accDpMount;   // for the other pages (Reminders > Schedule); accountability.js is loaded on every page
   window.accInsPickDate=function(ev){
     ev.stopPropagation(); const btn=ev.currentTarget;
     if(POPOVER_ANCHOR===btn){ closePopover(); return; }

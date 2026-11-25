@@ -252,7 +252,7 @@ export async function reminderSendCustomers(req: Request, body: any, db: any, j:
               body: JSON.stringify({ raw: b64url(mime(CU!, to, subject, text, html, att)) }) });
             if (!g.ok) { ok = false; err = ("Gmail " + g.status + ": " + (await g.text())).slice(0, 300); }
           } else {
-            await client!.send({ from: `Riya Roy - The Jain Group <${CU}>`, to, subject: asciiSubject(subject), ...mailBody(text, html), attachments: att });
+            await client!.send({ from: `The Jain Group <${CU}>`, to, subject: asciiSubject(subject), ...mailBody(text, html), attachments: att });
           }
         } catch (e) { ok = false; err = String((e as Error)?.message || e).slice(0, 300); }
         // the log keeps what went: amount, project, flat and letter too (20 Nov 2026, "a proper Log System");

@@ -640,22 +640,29 @@ function caPaint(){
         +nm(caret(aon)+caDot(anyLive?'ACTIVE':ae.status)+thumb,(ae.name||('Ad '+a.ad_id))+(nCamps>1?'  ·  '+nCamps+' campaigns':''))+(FB?'':money(null))
         +rowCols(fbT(a,pl,a.rows),W2[a.k]?fbT(W2[a.k],pl,W2[a.k].rows):raw(null,pl,null),crmIds(a.ids,a.spend,(W2[a.k]||{}).spend),a,copies>1?reachOf('group',a.k):reachOf('ad',Object.keys(a.ids)[0]))+'</tr>';
       if(!aon) return;
-      // up one: every campaign the ad runs in - the campaign's own figures
+      /* THE AD'S OWN FIGURES UNDER IT (25 Nov 2026, Ayush: "when an Ad is opened, the Campaigns and Ad Sets show the leads THE AD generated in those, and only those ad sets where that ad is listed"):
+         an open ad lists the campaigns it runs in and, in each, the ad sets it runs in - and every one of those rows now shows only what THIS ad did there (spend, leads, clicks ... and the
+         CRM's leads tied to this ad in that campaign / ad set), not the campaign's or ad set's whole figures. Reach is the ad's overall (above), so it is blank on these rows. */
+      const adIn=function(list,cid,sid){ return agg(list,function(r){ return a.ids[String(r.ad_id)]&&(cid==null||String(r.campaign_id)===String(cid))&&(sid==null||String(r.adset_id)===String(sid)); }); };
+      const crmAdIn=function(cid,sid,sp,spw){ if(!CS) return crmNo('CRM figures by ad are read at night - they show from the next morning');
+        const pp=function(x){ return x.level==='ad'&&a.ids[String(x.ad_id)]&&(cid==null||String(x.campaign_id)===String(cid))&&(sid==null||String(x.adset_id)===String(sid)); };
+        if(!CS.cur.some(pp)) return crmNo('The CRM has no leads tied to this ad here for these dates'); return {t:crmT(crmAgg(CS.cur,pp),+sp||0),w:crmT(crmAgg(CS.prev,pp),+spw||0)}; };
+      // up one: every campaign the ad runs in - what this ad did there
       const cids=[...new Set(a.rows.map(function(r){ return r.campaign_id; }))].sort(function(x,y){ const cx=CA_D.cur.filter(function(c){ return c.campaign_id===x; })[0]||{}, cy=CA_D.cur.filter(function(c){ return c.campaign_id===y; })[0]||{}; return (+cy.spend||0)-(+cx.spend||0); });
       cids.forEach(function(cid){
         const c=CA_D.cur.filter(function(x){ return x.platform===pl&&x.campaign_id===cid; })[0]||{campaign_id:cid,platform:pl,project:p,spend:0,clicks:0,impressions:0,results:0};
-        const ce=E['campaign:'+cid]||{}, ck=a.k+'|'+cid, con=AX.camp===ck, lead=pl==='meta'?obIsLead(E,c):null, was=prev.filter(function(x){ return x.platform===pl&&x.campaign_id===cid; })[0];
+        const ce=E['campaign:'+cid]||{}, ck=a.k+'|'+cid, con=AX.camp===ck, lead=pl==='meta'?obIsLead(E,c):null, ac=adIn(CA_D.ads,cid,null), aw=cmpOn?adIn((CA_D.cmp&&CA_D.cmp.ads)||[],cid,null):null;
         rows+='<tr class="ca-row ca-l1'+(con?' ca-on':'')+'" onclick="caAx(\'camp\',_caAxK['+(window._caAxK.push(ck)-1)+'])">'+nm(caret(con)+caDot(ce.status),ce.name||cid)
           +(FB?'':(cBud(cid)==null&&caCampBud(cid,true)!=null&&caLive(ce.status)?idle(cid):!caLive(ce.status)?'<td>'+(cBud(cid)==null?'<span style="color:#94a3b8">—</span>':obMoney(cBud(cid)))+'<div class="ca-sub">'+esc(String(ce.status||'stopped').toLowerCase())+'</div></td>':money(cBud(cid))))
-          +rowCols(FB?fbT(c,pl,[c]):raw(c,pl,lead),FB&&was?fbT(was,pl,[was]):raw(was,pl,lead),crmX(function(x){ return x.campaign_id===cid; },pl==='google'?'google':'facebook'),FB?Object.assign(agg(CA_D.ads,function(r){ return r.campaign_id===cid; }),{impressions:+c.impressions||0}):null,reachOf('campaign',cid))+'</tr>';
+          +rowCols(FB?fbT(ac,pl,[{campaign_id:cid,results:ac.results}]):raw(ac,pl,lead),cmpOn?(FB?fbT(aw,pl,[{campaign_id:cid,results:aw.results}]):raw(aw,pl,lead)):raw(null,pl,null),crmAdIn(cid,null,ac.spend,aw&&aw.spend),ac,null)+'</tr>';
         if(!con) return;
         // up again: the ad sets / ad groups of that campaign the ad runs in - the ad set's own figures
         const sids=[...new Set(a.rows.filter(function(r){ return r.campaign_id===cid&&r.adset_id; }).map(function(r){ return r.adset_id; }))];
         if(!sids.length){ rows+='<tr class="ca-l2 ca-none"><td colspan="'+nc+'">No '+W.set.toLowerCase()+' recorded for this ad here</td></tr>'; return; }
         sids.forEach(function(sid){
-          const se=E['adset:'+sid]||{}, sa=setAgg(CA_D.ads,sid), sw=cmpOn?setAgg((CA_D.cmp&&CA_D.cmp.ads)||[],sid):null;
+          const se=E['adset:'+sid]||{}, sa=adIn(CA_D.ads,cid,sid), sw=cmpOn?adIn((CA_D.cmp&&CA_D.cmp.ads)||[],cid,sid):null;
           const sb=se.daily_budget!=null?money(se.daily_budget):ce.daily_budget!=null?'<td title="The budget is set on the campaign and shared by its '+W.sets.toLowerCase()+'"><span style="color:#64748b">'+obMoney(ce.daily_budget)+'</span><div class="ca-sub">shared</div></td>':money(null);
-          rows+='<tr class="ca-l2"><td class="ca-nm"><span class="ca-nmx" title="'+esc(se.name||sid)+'">'+caDot(se.status||ce.status)+esc(se.name||sid)+'</span></td>'+(FB?'':sb)+rowCols(fbT(sa,pl,[{campaign_id:cid,results:sa.results}]),sw?fbT(sw,pl,[{campaign_id:cid,results:sw.results}]):raw(null,pl,null),crmSetX(sid,sa.spend,sw&&sw.spend),sa,reachOf('adset',sid))+'</tr>';
+          rows+='<tr class="ca-l2"><td class="ca-nm"><span class="ca-nmx" title="'+esc(se.name||sid)+'">'+caDot(se.status||ce.status)+esc(se.name||sid)+'</span></td>'+(FB?'':sb)+rowCols(fbT(sa,pl,[{campaign_id:cid,results:sa.results}]),sw?fbT(sw,pl,[{campaign_id:cid,results:sw.results}]):raw(null,pl,null),crmAdIn(cid,sid,sa.spend,sw&&sw.spend),sa,null)+'</tr>';
         });
       });
     });

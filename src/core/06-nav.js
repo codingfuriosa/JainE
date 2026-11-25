@@ -17,7 +17,7 @@ const NAV=[
     {id:'postsales',label:'Post Sales',icon:'fa-headset'},
     // Site Visit / Booked customers by PIN code on a map, month by month - src/core/41-lead-map.js
     {id:'lead_map',label:'Lead Map',icon:'fa-map-location-dot'},
-    // project information for Sales, verified before it shows (21 Nov 2026) - 60-reckoner.js
+    // project information for Pre-Sales and Sales calls (21 Nov 2026, rebuilt 23 Nov) - 60/62-reckoner
     {id:'reckoner',label:'Reckoner',icon:'fa-book-bookmark'},
   ]},
   {group:'Operations',items:[
@@ -122,6 +122,7 @@ function expandModules(ss){
   if(ss.has('custportal_photos')||ss.has('custportal_photo_approver')||ss.has('custportal_photo_backup')) ss.add('custportal_admin');
   if(ss.has('campaigns')) ss.add('wa_templates');   // WhatsApp Templates: everyone with Campaign Analytics (17 Nov 2026)
   if(ss.has('competitors_jg')) ss.add('competitors');   // Competitor Data, Jain Group tabs only (18 Nov 2026) - see cdJgOnly()
+  if(ss.has('crm_perf')) ss.add('crm');   // CRM & Sales, Performance Report tab only (25 Nov 2026) - see crmPerfOnly()
   ALWAYS_ON.forEach(function(id){ ss.add(id); });
   return ss;
 }
@@ -130,6 +131,10 @@ function expandModules(ss){
 /* TEMPORARILY (20 Nov 2026, the user: "for Administrator remove the Competitor Facebook and Google data temporarily in Competitor Data"): the Administrator (super admin) sees only the two Jain Group
    tabs, like the Jain Group-only accounts - the Meta Ads and Google Ads Transparency (competitor) tabs are hidden for them. Nothing is deleted; set CD_ADMIN_NO_COMPETITORS to false to bring them back. */
 const CD_ADMIN_NO_COMPETITORS=false;
+/* 'crm_perf' = CRM & Sales limited to its Performance Report tab (25 Nov 2026, Ayush: "Give Campaign Analytics and
+   Performance Report to Riya Dey" - Performance Report only). Someone who also holds 'crm' sees every tab. The database lets
+   'crm_perf' type the Spent amounts (acc.crm_perf_spend write policy). */
+function crmPerfOnly(){ if(state.super) return false; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('crm_perf')!==-1&&m.indexOf('crm')===-1; }
 function cdJgOnly(){ if(state.super)return CD_ADMIN_NO_COMPETITORS; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('competitors_jg')!==-1&&m.indexOf('competitors')===-1; }
 /* 'custportal_photos' = Customer Portal Admin limited to its Photos & Videos tab. The database
    enforces the same boundary (app.is_custportal_media_editor): such an account can write the four

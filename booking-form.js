@@ -308,14 +308,15 @@ function stepPay(){
       // with fewer than 2 receipts Bank sits on the left under them; from the 2nd receipt it moves to the right, under the reference (Ayush, 20 Nov 2026; was the 3rd)
       +(function(){
         const nRc=((FILES[0]&&FILES[0].payment)||[]).length;
-        const bank=chq?field('pay.bank','Bank (drawn on)',{req:1,full:1})+field('pay.branch','Branch',{optional:1,full:1}):field('pay.bank','Bank',{optional:1,full:1});
+        // 23 Nov 2026 (Ayush: "Demand Draft - I upload but there is empty space at the bottom right"): with a Demand Draft the Bank stays under the receipt (left) and the Branch goes under the DD number (right), so the two sides end level
+        const bank=chq?field('pay.bank','Bank (drawn on)',{req:1,full:1}):field('pay.bank','Bank',{optional:1,full:1}), branch=chq?field('pay.branch','Branch',{optional:1,full:1}):'';
         return '<div class="pcol">'
           +wrapF(proof,'Payment proof',{full:1,req:1,note:'Screenshots or receipts of the payment - add as many as you need'},docUpl(0,'payment','Take a photo or attach the receipt','The UTR / transaction number should be readable',10))
           +(nRc<2?bank:'')
           +'</div><div class="pcol">'
           +field('pay.date',chq?'DD date':'Date paid',{type:'date',req:1,full:1})
           +field('pay.ref',({'Demand Draft':'DD number','Card':'Card transaction ID'}[S.pay.mode]||'UTR / transaction reference'),{optional:1,cls:'up',full:1})   /* optional (19 Nov 2026) */
-          +(nRc>=2?bank:'')
+          +(nRc>=2?bank:'')+branch
           +'</div>';
       })()
       +'</div></div>')
@@ -394,7 +395,7 @@ const DECL=[
  'I/We have seen the proposed plan of the project and am/are desirous of purchasing an apartment in this complex. I/We have signed the application form for allotment and the Declaration after reading and understanding the same. All the terms, condition obligations, considerations etc. contained therein are fully acceptable to and agreeable by me/us and I/we confirm my/our unconditional acceptance of the same. I/We agree to sign your standard agreement for sale on stamp papers as per your requirements within 15 days of this booking. Or as and when requested.',
  'The layout plans and building plans, dimensions elevation, colour scheme, specifications of the building(s)/ complex of the apartment are tentative and subject to variation. The owner/Developer may effect such variations, additions, alterations, deletions and /or modifications therein as it may, at its sole discretion, deem appropriate and fit or as may be directed by any competent authority. No complain regarding design, layout and accommodation shall be entertained.'];
 const SPECIAL=[
- 'Advance Maintenance charges, deposits, electrical meter deposit, electrical connection charges, water connection charges, documentation/legal charges, Society formation charges and other charges may be applicable, shall be separately charged along with applicable taxes thereon.',
+ 'Advance Maintenance charges, deposits, electrical meter deposit, electrical connection charges, water connection charges, documentation/legal charges, Society formation charges and other charges applicable, shall be separately charged along with necessary taxes as and when applicable, thereon.',
  'If the Allotee(s) fail to take possession within Thirty (30) days from the date of intimation in writing by Developer, then the Allotee(s) shall be liable to pay holding charges to Developers as per the decision of the developer for the entire period of such delay. Furthermore, no request for work/repairs/correction shall be entertained by the Developer after the above time has passed.',
  'Right-to-use car parking facility will be provided in the complex subject to availability. It comprises of Open & Covered parking, Parking spaces will be allotted by the Developer. Car Parking space can be dependent, independent, covered by building, basement or asbestos shed as builder may deem fit. The total number of car parks as mentioned in the marketing documents and/or brochures are merely indicative and the exact number thereof can only be known after completion of the respective building/tower. It is further agreed that in case the number of application car parks are more than the actual number of car parks available, their allotment will be made on the basis of first applied first served depending upon the number of applications and the availability of the same on or before final possession. Jain group has the option to cancel allotment of parking space if payments are not made regularly.<br><br>Earmarking of specific parking space will be done at time of giving of possession of the Residential Apartment. Each allotted parking space will entitle the Allottee(s) the right to park only one vehicle In case of transfer of Residential Apartment, the right to use the parking space shall be automatically transferred along with the Residential Apartment.The right to use the parking space under no circumstances is separately transferable. The right to use parking space(s) shall not conform upon the Allottee(s) any right of ownership of the space on which such parking facility is provided. Unallotted parking space, if any, shall continue to remain the property and in possession of Jain Group. It shall be the discretion of Jain Group to allot/use these unalloted parking spaces as it may decide, at its sole discretion.',
  'The Allottee(s) shall from time to time sign all applications, papers, documents, maintenance agreement, electricity agreement and other revenant papers, as required in pursuance to the allotment and to do all acts, deeds and things as Jain Group may require in the interest of the complex and Apartment. In case of Joint Allotee, any document signed/accepted acknowledge by any one of the Allottee(s) shall be binding upon the other Allottee.',
@@ -416,7 +417,7 @@ function stepTerms(){
     // 19 Nov 2026: the cost sheet is at the top of the form AND here again, just before the customer agrees to it (Ayush: "why is there no cost sheet in the Terms page")
     +(COST.meta?card('','','Cost sheet','Prepared for you by our Sales team. Tap a page to zoom in; you can download it too.',costBody()):'')
     +card('','','Agreement','',
-      '<label class="agree'+(ERR.terms_accepted?' bad':'')+'" id="f-terms_accepted"><input type="checkbox" data-check="terms_accepted"'+(S.terms_accepted?' checked':'')+'><span><b>I/We have read and agree to all the above'+(COST.meta?' and to the cost sheet':'')+'.</b><br><span style="color:var(--slate);font-size:13px">I/We confirm that everything in this form is true.</span><div class="err">'+esc(ERR.terms_accepted||'')+'</div></span></label>');
+      '<label class="agree'+(ERR.terms_accepted?' bad':'')+'" id="f-terms_accepted"><input type="checkbox" data-check="terms_accepted"'+(S.terms_accepted?' checked':'')+'><span><b>I/We have read and agreed to all the above-stated Terms and Conditions, Declaration and Special Conditions'+(COST.meta?', and hereby expressly agree to the Cost Sheet and the Payment Plan. I/We further acknowledge that the Cost Sheet is subject to change and that the finalised Cost Sheet will be attached to the Agreement':'')+'.</b><br><span style="color:var(--slate);font-size:13px">I/We confirm and declare that everything in this form is true and that nothing has been concealed.</span><div class="err">'+esc(ERR.terms_accepted||'')+'</div></span></label>');
 }
 // The Terms, Declaration and Special Conditions, folded - for the submitted form (19 Nov 2026: "in this page ... collapsible")
 function termsBlock(){
@@ -593,8 +594,13 @@ function openZoom(i){
     +'<div class="zarea" id="zarea"><img alt="Cost sheet page '+(i+1)+'" src="'+COST.pages[i]+'"></div>';
   document.body.appendChild(d); document.documentElement.classList.add('noscroll');
   const img=d.querySelector('img');
-  const apply=function(){ img.style.width=Math.round(Math.min(window.innerWidth-28,1100)*z)+'px'; };
-  apply();
+  /* 23 Nov 2026 (Ayush: "Fit does nothing when the cost sheet is zoomed"): Fit shows the WHOLE page in the window (width and height) and goes back to the top-left; before, it only
+     reset the width, so a page already as wide as the window looked unchanged and the scroll position stayed where it was. */
+  const za0=d.querySelector('#zarea');
+  const base=function(){ const w=Math.min(window.innerWidth-28,1100), r=img.naturalWidth&&img.naturalHeight?img.naturalWidth/img.naturalHeight:0, h=za0?za0.clientHeight-20:0;
+    return r&&h>120?Math.min(w,Math.round(h*r)):w; };
+  const apply=function(){ img.style.width=Math.round(base()*z)+'px'; };
+  apply(); img.addEventListener('load',apply);
   // another page: the picture, the title and the buttons follow, the zoom goes back to fit, and the page under the zoom moves with it
   const turn=function(step){
     const j=Math.max(0,Math.min(n-1,i+step)); if(j===i) return; i=j; z=1; apply();
@@ -609,7 +615,7 @@ function openZoom(i){
   d.addEventListener('click',function(e){
     const b=e.target.closest('[data-z]'); if(!b) return; const k=b.getAttribute('data-z');
     if(k==='prev'||k==='next'){ turn(k==='next'?1:-1); return; }
-    if(k==='in') z=Math.min(5,z*1.4); else if(k==='out') z=Math.max(1,z/1.4); else if(k==='fit') z=1;
+    if(k==='in') z=Math.min(5,z*1.4); else if(k==='out') z=Math.max(1,z/1.4); else if(k==='fit'){ z=1; if(za0){ za0.scrollTop=0; za0.scrollLeft=0; } }
     else if(k==='dl'){ dl(COST.pages[i],'Cost sheet - page '+(i+1)+'.jpg'); return; }
     else if(k==='x'){ closeZoom(); return; }
     apply();
@@ -886,7 +892,8 @@ document.addEventListener('click',function(e){
   if(b.dataset.addwhy){ S.why.push(''); save(); render(); const ins=document.querySelectorAll('[data-k^="why."]'); ins[ins.length-1].focus(); return; }
   if(b.dataset.rmwhy){ S.why.splice(+b.dataset.rmwhy,1); save(); render(); return; }
   if(b.dataset.delfile){ const p=b.dataset.delfile.split('|'); FILES[+p[0]][p[1]].splice(+p[2],1); save(); render(); return; }
-  if(b.dataset.go){ if(S.step===STEPS.length-1) FROM_REVIEW=true; go(+b.dataset.go); return; }
+  // Edit on the review page (23 Nov 2026, Ayush): the page opens with the Cost Sheet panel CLOSED, not left open from before
+  if(b.dataset.go){ if(S.step===STEPS.length-1) FROM_REVIEW=true; COST_OPEN=false; go(+b.dataset.go); return; }
   if(b.dataset.back){ if(FROM_REVIEW){ FROM_REVIEW=false; go(STEPS.length-1); return; } go(S.step-1); return; }
   if(b.dataset.next){
     if(S.step===STEPS.length-1){ submit(); return; }

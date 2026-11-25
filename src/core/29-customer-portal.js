@@ -1430,7 +1430,7 @@ async function cpaImportConfirmXlsx(st){
         payment_mode:rec.mode,instrument_no:rec.instrumentNo,instrument_date:rec.instrumentDate,
         drawn_on:rec.drawnOn,drawn_on_branch:rec.drawnOnBranch,deposit_bank:rec.depositBank,
         narration:rec.narration,total_amount:totalAmt,
-        is_reversed:rec.isReversed==='Yes',unit_status_at_receipt:rec.unitStatus,
+        is_reversed:String(rec.isReversed||'').trim().toUpperCase()==='YES',unit_status_at_receipt:rec.unitStatus,   // Farvision writes "YES" (25 Nov 2026)
         is_current:true,import_batch_id:batchId};
       let rcptId=existingRcpt[unit.id+'|'+rec.receiptNo];
       if(rcptId){ const {error:ue}=await sb.schema('cust').from('money_receipts').update(rcptRow).eq('id',rcptId); if(ue)throw ue; }

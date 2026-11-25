@@ -47,6 +47,42 @@ Deno.serve(async (req) => {
   if (!T) { await setState({ last_error: "META_WA_TOKEN is not saved", last_error_at: new Date().toISOString() }); return j({ error: "no key" }, 500); }
   const tk = "access_token=" + encodeURIComponent(T);
 
+  // body.probe (25 Nov 2026, Ayush: "how many Replies were given can be extracted?? Try again"): READ-ONLY look at what
+  // Meta gives about replies for one account - template_analytics with each candidate metric, the account's webhook
+  // subscriptions and its phone numbers. Writes nothing.
+  // body.subscribe (25 Nov 2026, Ayush set up the "JainE Wa2" webhook -> wa-replies and said "Done"): connect this key's app
+  // to every WhatsApp account in camp.wa_accounts (POST /{waba}/subscribed_apps), so Meta sends their customers' messages
+  // to wa-replies. The ONLY write this function makes at Meta; it changes nothing else and sends no message.
+  if (body.subscribe) {
+    const { data: accs } = await camp.from("wa_accounts").select("id,name");
+    const out: any[] = [];
+    for (const a of accs || []) {
+      const r = await fetch(G + "/" + a.id + "/subscribed_apps?" + tk, { method: "POST" }); const b: any = await r.json().catch(() => ({}));
+      const chk: any = await gget(G + "/" + a.id + "/subscribed_apps?" + tk);
+      out.push({ name: a.name, ok: !!b.success, error: b.error ? String(b.error.message || "") : null, apps: (chk.data || []).map((x: any) => x.whatsapp_business_api_data?.name || x.whatsapp_business_api_data?.id) });
+    }
+    return j({ subscribed: out });
+  }
+  if (body.probe) {
+    const wid = String(body.probe.waba || ""); const out: any = { waba: wid };
+    const tl: any = await gall(G + "/" + wid + "/message_templates?fields=id,name&limit=50&" + tk, 2);
+    const ids = (tl.data || []).slice(0, 10).map((t: any) => t.id); out.templates = (tl.data || []).length;
+    const e = Math.floor(Date.now() / 86400000) * 86400, s = e - 7 * 86400;
+    for (const m of (body.probe.metrics || ["SENT,DELIVERED,READ,CLICKED,REPLIED", "REPLIED", "REPLY", "REPLIES"])) {
+      const r: any = await gget(G + "/" + wid + "/template_analytics?start=" + s + "&end=" + e + "&granularity=DAILY&metric_types=" + m + "&template_ids=" + encodeURIComponent(JSON.stringify(ids)) + "&" + tk);
+      out["metric " + m] = r.err ? { err: r.err } : { sample: JSON.stringify(r).slice(0, 1500) };
+    }
+    out.subscribed_apps = await gget(G + "/" + wid + "/subscribed_apps?" + tk);
+    out.phones = await gget(G + "/" + wid + "/phone_numbers?fields=id,display_phone_number,verified_name&" + tk);
+    for (const f of ["conversation_analytics.start(" + s + ").end(" + e + ").granularity(DAILY).dimensions([\"CONVERSATION_DIRECTION\",\"CONVERSATION_TYPE\"])",
+                     "pricing_analytics.start(" + s + ").end(" + e + ").granularity(DAILY).dimensions([\"PRICING_CATEGORY\",\"PRICING_TYPE\"])"]) {
+      const r: any = await gget(G + "/" + wid + "?fields=" + encodeURIComponent(f) + "&" + tk);
+      out[f.split(".")[0]] = r.err ? { err: r.err } : JSON.stringify(r).slice(0, 2500);
+    }
+    return j(out);
+  }
+
+  let hasReplied: boolean | null = null, hasCost: boolean | null = null;
   // ---- every business the key reaches ----
   const biz = new Map<string, string>();
   const mb: any = await gall(G + "/me/businesses?fields=id,name&" + tk, 3); (mb.data || []).forEach((b: any) => biz.set(b.id, b.name));
@@ -158,11 +194,13 @@ Deno.serve(async (req) => {
     // read of one page gave 8 sends where the same week read in full gave 818. Now 7-day ranges, 10 templates a request,
     // and every page followed.
     const ids = trows.map((t: any) => t.id);
+    // replied (25 Nov 2026): Meta's count of customers who answered the template with a message; stored once the column exists
+    if (hasReplied === null) { const t = await camp.from('wa_template_daily').select('replied').limit(1); hasReplied = !t.error; if (t.error) rep.notes.push('replied column not there yet - not stored'); }
     let refused = "";
     for (let s = from; s < until && !refused; s += 7 * 86400) {
       const e = Math.min(s + 7 * 86400, until);
       for (let i = 0; i < ids.length && !refused; i += 10) {
-        let url: string | null = G + "/" + wid + "/template_analytics?start=" + s + "&end=" + e + "&granularity=DAILY&metric_types=SENT,DELIVERED,READ,CLICKED"
+        let url: string | null = G + "/" + wid + "/template_analytics?start=" + s + "&end=" + e + "&granularity=DAILY&metric_types=SENT,DELIVERED,READ,CLICKED,REPLIED"
           + "&template_ids=" + encodeURIComponent(JSON.stringify(ids.slice(i, i + 10))) + "&" + tk;
         for (let pg = 0; url && pg < 50; pg++) {
           const r: any = await gget(url);
@@ -170,9 +208,9 @@ Deno.serve(async (req) => {
           const rows: any[] = [];
           for (const blk of r.data || []) for (const p of blk.data_points || []) {
             const clicks = (p.clicked || []) as any[];
-            if (!p.sent && !p.delivered && !p.read && !clicks.length) continue;
+            if (!p.sent && !p.delivered && !p.read && !p.replied && !clicks.length) continue;
             rows.push({ template_id: String(p.template_id), day: day(p.start), sent: p.sent || 0, delivered: p.delivered || 0, read: p.read || 0,
-              clicked: clicks.reduce((n, c) => n + (c.count || 0), 0), clicks: clicks.length ? clicks : null, synced_at: new Date().toISOString() });
+              clicked: clicks.reduce((n, c) => n + (c.count || 0), 0), clicks: clicks.length ? clicks : null, synced_at: new Date().toISOString(), ...(hasReplied ? { replied: p.replied || 0 } : {}) });
           }
           if (rows.length) { const { error } = await camp.from("wa_template_daily").upsert(rows, { onConflict: "template_id,day" }); if (error) rep.errors.push("save daily: " + error.message); }
           rep.days += rows.length;
@@ -183,6 +221,28 @@ Deno.serve(async (req) => {
       }
     }
     if (refused) rep.notes.push((w.name || wid) + ": template analytics not available - " + refused);
+
+    // COST (25 Nov 2026, Ayush: "I want 2" - WhatsApp cost per number per day): Meta's pricing_analytics for the same stretch,
+    // per day (the account's own day, IST), category and pricing type - messages charged and what they cost. Stored once
+    // camp.wa_cost_daily exists (created 25 Nov 20:03 IST).
+    if (hasCost === null) { const t = await camp.from('wa_cost_daily').select('day').limit(1); hasCost = !t.error; if (t.error) rep.notes.push('wa_cost_daily not there yet - cost not stored'); }
+    if (hasCost) {
+      const f = "pricing_analytics.start(" + from + ").end(" + until + ").granularity(DAILY).dimensions([\"PRICING_CATEGORY\",\"PRICING_TYPE\"])";
+      const pa: any = await gget(G + "/" + wid + "?fields=" + encodeURIComponent(f) + "&" + tk);
+      if (pa.err) rep.notes.push((w.name || wid) + ": cost not available - " + pa.err);
+      else {
+        const acc: Record<string, any> = {};
+        for (const blk of pa?.pricing_analytics?.data || []) for (const p of blk.data_points || []) {
+          const dayIst = new Date((Number(p.start) + 19800) * 1000).toISOString().slice(0, 10);
+          const k = dayIst + "|" + (p.pricing_category || "") + "|" + (p.pricing_type || "");
+          const o = acc[k] || (acc[k] = { waba_id: wid, day: dayIst, category: p.pricing_category || "", pricing_type: p.pricing_type || "", volume: 0, cost: 0, synced_at: new Date().toISOString() });
+          o.volume += Number(p.volume || 0); o.cost += Number(p.cost || 0);
+        }
+        const rows = Object.values(acc);
+        if (rows.length) { const { error } = await camp.from('wa_cost_daily').upsert(rows, { onConflict: 'waba_id,day,category,pricing_type' }); if (error) rep.errors.push('save cost: ' + error.message); }
+        rep.costDays = (rep.costDays || 0) + rows.length;
+      }
+    }
   }
   await setState({ last_sync_at: new Date().toISOString(), last_result: rep,
     last_error: rep.errors.length ? rep.errors.slice(0, 3).join(" | ") : null, last_error_at: rep.errors.length ? new Date().toISOString() : null });

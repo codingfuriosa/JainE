@@ -62,6 +62,42 @@ export async function reminderScheduleRun(req: Request, db: any, j: J): Promise<
     for (const q of claimed) {
       if (Date.now() - t0 > 115_000) { await done(q.id, "pending", "time ran out - next run"); continue; }
       const bno = q.booking_no, x = file[bno];
+      // TEST RECORDS (23 Nov 2026, Ayush: "make a Test Record for me in Reminders ... Weekly ... Wednesday ... a new Test
+      // Record ... Daily"). A schedule whose booking_no is "TEST-<id>-<anything>" is a made-up customer: postsales.
+      // reminder_test_recipients row <id> gives the name, email and amount; the letter is a sample; the subject says
+      // [TEST]; it is logged as a test. It goes only to that test address - never to a customer.
+      const tm = String(bno || "").match(/^TEST-(\d+)/);
+      if (tm) {
+        const { data: tr } = await PS.from("reminder_test_recipients").select("*").eq("id", Number(tm[1])).maybeSingle();
+        const temail = String(tr?.email || "").trim().toLowerCase();
+        const { count: tdone } = await PS.from("reminder_send_log").select("id", { count: "exact", head: true }).eq("booking_no", bno).eq("ok", true).eq("test", true).gte("sent_at", dayStart);
+        const twhy = !tr ? "test address not found" : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(temail) ? "test address has no email" : (tdone || 0) > 0 ? "already sent today" : null;
+        if (twhy) { await done(q.id, "skipped", twhy); out.push({ booking_no: bno, skipped: twhy }); continue; }
+        const tnet = Number(tr.net_outstanding) > 0 ? Number(tr.net_outstanding) : 10000, tday = dayStart.slice(0, 10);
+        const td = { booking_no: bno, unit: { id: "TEST", unit_code: tr.flat || "Test", tower: "TEST", application_no: "TEST" }, project: tr.project || "TEST", setup: {},
+          contact: { contact_email: temail, contact_address: "Test record - not a customer", contact_phone: "" }, name: tr.customer_name || "Test", pan: "", floor: "", category: "",
+          lines: [{ particulars: "TEST - sample instalment", bill_no: "TEST", bill_date: tday, due_date: tday, days: "0", bill: tnet, rec: 0, bal: tnet }],
+          summary: false, onacc: 0, total: tnet, net: tnet, late: 0, ref: "JRM/TEST/" + tday.replace(/-/g, "") };
+        let tpdf: Uint8Array;
+        try { tpdf = await letterPdf(td); } catch (e) { await done(q.id, "failed", "letter: " + String((e as Error)?.message || e).slice(0, 200), { attempts: 99 }); continue; }
+        const trow = { customer_name: String(tr.customer_name || "").trim(), project: tr.project || "TEST", flat: tr.flat || "Test", net_outstanding: tnet };
+        const tsubject = "[TEST] " + fill(st?.subject || "", trow), ttext = fill(st?.body || "", trow);
+        const thtml = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111827;white-space:pre-wrap">' + esc(ttext) + "</div>";
+        const tfname = "Reminder Letter - " + bno.replace(/[^\w\-]+/g, "_") + ".pdf";
+        let tok = false, terr: string | null = null;
+        for (let t = 1; t <= 3 && !tok; t++) {
+          try { await client.send({ from: `The Jain Group <${CU}>`, to: temail, subject: asciiSubject(tsubject), ...mailBody(ttext, thtml),
+            attachments: [{ filename: tfname, content: b64(tpdf), encoding: "base64", contentType: "application/pdf" }] }); tok = true; terr = null; }
+          catch (e) { terr = String((e as Error)?.message || e).slice(0, 300); if (t < 3) await sleep(4000); }
+        }
+        const tbase = { sent_by: "Schedule test (" + (q.frequency || "") + ")", from_email: CU, recipient_email: temail, customer_name: trow.customer_name, booking_no: bno, subject: tsubject, ok: tok, error: terr, test: true };
+        const tins = await PS.from("reminder_send_log").insert({ ...tbase, amount: tnet, project: trow.project, unit: trow.flat, source: "Schedule", attachment: tfname });
+        if (tins.error) await PS.from("reminder_send_log").insert(tbase);
+        if (tok) { await done(q.id, "sent", null, { sent_at: new Date().toISOString() }); await PS.from("reminder_schedules").update({ last_sent_on: tday, last_note: "sent" }).eq("id", q.schedule_id); }
+        else { await done(q.id, Number(q.attempts || 0) >= 3 ? "failed" : "pending", terr); await PS.from("reminder_schedules").update({ last_note: "failed: " + (terr || "") }).eq("id", q.schedule_id); }
+        out.push({ booking_no: bno, ok: tok, error: terr, test: true });
+        continue;
+      }
       // can they still be reminded today?
       const { data: em } = await db.schema("cust").from("farvision_contacts").select("contact_email").eq("booking_no", bno).is("deleted_at", null)
         .not("contact_email", "is", null).order("is_current", { ascending: false }).order("created_at", { ascending: false }).limit(1).maybeSingle();
@@ -84,7 +120,7 @@ export async function reminderScheduleRun(req: Request, db: any, j: J): Promise<
       // send - up to 3 tries, a few seconds apart
       let ok = false, err: string | null = null;
       for (let t = 1; t <= 3 && !ok; t++) {
-        try { await client.send({ from: `Riya Roy - The Jain Group <${CU}>`, to: email, subject: asciiSubject(subject), ...mailBody(text, html),
+        try { await client.send({ from: `The Jain Group <${CU}>`, to: email, subject: asciiSubject(subject), ...mailBody(text, html),
           attachments: [{ filename: fname, content: b64(pdf), encoding: "base64", contentType: "application/pdf" }] }); ok = true; err = null; }
         catch (e) { err = String((e as Error)?.message || e).slice(0, 300); if (t < 3) await sleep(4000); }
       }

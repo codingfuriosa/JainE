@@ -19,6 +19,7 @@
   h1{margin:0 0 4px;font-size:22px;font-weight:800;display:flex;align-items:center;gap:10px}.sub{color:var(--slate);font-size:12.5px}
   .bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:14px 0}
   .bar select{height:36px;padding:0 11px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:13px;font-weight:600;background:#fff}
+  .cr{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--slate);flex-wrap:wrap}.cr input{height:34px;padding:0 8px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;color:var(--ink)}
   .stg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff}.st{display:inline-flex;align-items:center;gap:6px;padding:7px 11px;font-size:12.5px;font-weight:600;color:#334155;cursor:pointer;border-right:1px solid var(--line)}.st:last-child{border-right:0}.st input{margin:0;accent-color:var(--brand)}.st.on{background:#eef4ff;color:#1d4ed8}
   .card{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow-x:auto}
   .tbl{width:100%;border-collapse:collapse;font-size:13px}
@@ -87,7 +88,7 @@ var R=(function(){
   function load(){
     if(!key){ off(); return; }
     if(D) app.style.opacity='.55'; else app.innerHTML='<div class="loading">Loading…</div>';
-    call({period:S.period}).then(function(d){ app.style.opacity=''; if(!d||d.off||d.error||!d.camps){ off(); return; } D=d; prep(); paint(); }).catch(function(){ app.style.opacity=''; off(); });
+    call(S.period==='custom'?{period:'custom',from:S.from,to:S.to}:{period:S.period}).then(function(d){ app.style.opacity=''; if(!d||d.off||d.error||!d.camps){ off(); return; } D=d; prep(); paint(); }).catch(function(){ app.style.opacity=''; off(); });
   }
   // lookups and the Active / Inactive / Both choice
   function prep(){
@@ -122,11 +123,14 @@ var R=(function(){
   var nm=function(lead,text){ return '<td class="nm"><span class="nmx" title="'+esc(text)+'">'+lead+esc(text)+'</span></td>'; };
   function paint(){
     var C=camps(), crm=D.crm.filter(crmOk);
-    var periods=[['last_7d','Last 7 days'],['last_30d','Last 30 days'],['this_month','This month'],['last_month','Last month'],['last_90d','Last 90 days']];
+    // 25 Nov 2026 (Ayush): a Custom choice too - From / To dates and Apply
+    var periods=[['last_7d','Last 7 days'],['last_30d','Last 30 days'],['this_month','This month'],['last_month','Last month'],['last_90d','Last 90 days'],['custom','Custom']];
+    var today=new Date(Date.now()+330*60000).toISOString().slice(0,10);
+    var cust=S.period==='custom'||S.pick?'<span class="cr">From <input type="date" id="cf" min="2024-01-01" max="'+today+'" value="'+esc(S.from||D.from)+'"> To <input type="date" id="ct" min="2024-01-01" max="'+today+'" value="'+esc(S.to||D.to)+'"> <button class="btn" id="capply" style="background:var(--brand);color:#fff;border-color:var(--brand)">Apply</button></span>':'';
     var h='<h1>Campaign Report</h1><div class="sub">The Jain Group · Google and Facebook ads · '+esc(dmy(D.from))+' – '+esc(dmy(D.to))+'</div>'
       // the same two tabs as JainE's Campaign Analytics: Campaigns (top down) and Ads (from the ad up)
       +'<div class="tabs">'+[['campaigns','Campaigns'],['ads','Ads']].map(function(o){ return '<button class="tab'+(S.tab===o[0]?' on':'')+'" data-tab="'+o[0]+'">'+o[1]+'</button>'; }).join('')+'</div>'
-      +'<div class="bar"><select id="per">'+periods.map(function(o){ return '<option value="'+o[0]+'"'+(S.period===o[0]?' selected':'')+'>'+o[1]+'</option>'; }).join('')+'</select>'
+      +'<div class="bar"><select id="per">'+periods.map(function(o){ return '<option value="'+o[0]+'"'+((S.pick?'custom':S.period)===o[0]?' selected':'')+'>'+o[1]+'</option>'; }).join('')+'</select>'+cust
       +'<span class="stg">'+[['active','Active'],['inactive','Inactive'],['both','Both']].map(function(o){ return '<label class="st'+(S.st===o[0]?' on':'')+'"><input type="radio" name="st" value="'+o[0]+'"'+(S.st===o[0]?' checked':'')+'>'+o[1]+'</label>'; }).join('')+'</span></div>';
     var projs=D.projects.slice().map(function(p){ return {p:p,t:sum(C.filter(function(c){ return c.project===p; }),[])}; }).sort(function(a,b){ return b.t.spend-a.t.spend||a.p.localeCompare(b.p); });
     var rows='';
@@ -272,7 +276,11 @@ var R=(function(){
     document.getElementById('ov').classList.add('show');
     if(a.pl==='meta') call({action:'video',ad_id:a.id}).then(function(v){ var m=document.getElementById('med'); if(m&&v&&v.iframe){ m.className='media tall'; m.style.cssText='background:#fff'; m.innerHTML='<iframe src="'+esc(v.iframe)+'" allow="autoplay; encrypted-media; fullscreen" allowfullscreen></iframe>'; } }).catch(function(){});
   }
-  app.addEventListener('change',function(e){ if(e.target.id==='per'){ S.period=e.target.value; S.camp=null; S.set=null; load(); } else if(e.target.name==='st'){ S.st=e.target.value; S.camp=null; S.set=null; paint(); } });
+  app.addEventListener('click',function(e){ if(e.target.id!=='capply') return;
+    var f=(document.getElementById('cf')||{}).value, t=(document.getElementById('ct')||{}).value;
+    if(!f||!t){ alert('Choose both dates'); return; } if(f>t){ alert('From must be on or before To'); return; }
+    S.period='custom'; S.from=f; S.to=t; S.pick=false; S.camp=null; S.set=null; load(); });
+  app.addEventListener('change',function(e){ if(e.target.id==='per'){ if(e.target.value==='custom'){ S.pick=true; paint(); return; } S.pick=false; S.period=e.target.value; S.camp=null; S.set=null; load(); } else if(e.target.name==='st'){ S.st=e.target.value; S.camp=null; S.set=null; paint(); } });
   app.addEventListener('click',function(e){
     var t=e.target.closest('[data-thumb],[data-tab],[data-ax],[data-axc],[data-axmore],[data-open],[data-plat],[data-camp],[data-set],[data-row],[data-card],[data-more]'); if(!t) return;
     var d=t.dataset;

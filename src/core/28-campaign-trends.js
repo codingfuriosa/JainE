@@ -1292,14 +1292,14 @@ window.tpMpSave=async function(){
   const {data,error}=await sb.schema('hr').from('manpower_requests').insert(d).select().single();
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Submit';}return;}
   MP_RECORDS=[data,...(MP_RECORDS||[])];closeModal();
-  toast(data.approval_status==='Approved'?'Hiring request submitted and approved':'Hiring request submitted — HR has been asked to approve it');
+  toast('Hiring request submitted');
   tpMpRender();
-  // Fire the AI JD/Description/Creative generation in the background — the submitter doesn't need
+  // Fire the AI job-description generation in the background (only the description since 23 Nov 2026 - no post, no image) — the submitter doesn't need
   // to wait or have write access for this; it's just drafting content, not an approval action.
   sb.functions.invoke('manpower-ai-generate',{body:{request_id:data.id,requested_by:state.email||''}}).then(({data:gen,error})=>{
     const rec=(MP_RECORDS||[]).find(r=>r.id===data.id);if(!rec)return;
     if(error||!gen||gen.error){rec.ai_status='failed';return;}
-    rec.ai_status='ready';rec.ai_job_description=gen.job_description;rec.ai_job_description_json=gen.job_description_json;rec.ai_platform_post_text=gen.platform_post_text;rec.ai_creative_path=gen.creative_path;
+    rec.ai_status='ready';rec.ai_job_description=gen.job_description;rec.ai_job_description_json=gen.job_description_json;
     /* NO EMAIL ANY MORE (27 Oct 2026). A new description used to be mailed to HR here; the
        approval task in Accountability already tells them, so the mail was a second copy of the
        same news. */
@@ -1351,7 +1351,7 @@ window.tpMpShowDetail=function(id){
         <div style="font-size:18px;font-weight:700;color:var(--ink)">${esc(rec.job_title||'—')}</div>
         <div style="color:var(--slate);font-size:13px;margin-top:2px">${esc(rec.department||'—')} &nbsp;·&nbsp; ${mpFmtDate(rec.date_of_request)} &nbsp;·&nbsp; raised by ${esc(rec.raised_by||'—')}</div>
       </div>
-      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${priTag(rec.priority)}${tpApprovalTag(rec)}</div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${priTag(rec.priority)}</div>
     </div>
     <!-- APPROVING DOES NOT HAPPEN HERE ANY MORE.
 
@@ -1367,9 +1367,6 @@ window.tpMpShowDetail=function(id){
     <!-- Edit and Delete moved to the toolbar, on a tick. Opening a request in order to delete it
          meant reading a thing to throw it away, and put the most destructive control on the screen
          you land on after a click. -->
-    ${pending?`<div style="margin-top:10px;font-size:12.5px;color:var(--slate);background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:9px 12px">
-      <i class="fa-solid fa-circle-info"></i> Waiting for approval — approve or reject it from <b>Accountability › Pending Approval</b>.
-    </div>`:''}
     ${rec.approval_status==='Rejected'&&rec.rejection_reason?`<div style="margin-top:10px;padding:10px 14px;background:#fef2f2;border-radius:8px;border:1px solid #fecaca"><span style="font-size:11px;font-weight:700;text-transform:uppercase;color:#b91c1c">Rejection reason · </span><span style="font-size:13px;color:#7f1d1d">${esc(rec.rejection_reason)}</span></div>`:''}
     <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
       <div style="font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate);margin-bottom:10px">The request</div>
@@ -1443,16 +1440,10 @@ window.tpMpGenerate=async function(id){
     toast((error&&error.message)||(data&&data.error)||'Generation failed','err');
     rec.ai_status='failed';tpMpShowDetail(id);return;
   }
-  rec.ai_status='ready';rec.ai_job_description=data.job_description;rec.ai_job_description_json=data.job_description_json;rec.ai_platform_post_text=data.platform_post_text;rec.ai_creative_path=data.creative_path;
+  rec.ai_status='ready';rec.ai_job_description=data.job_description;rec.ai_job_description_json=data.job_description_json;
   toast('Generated');tpMpShowDetail(id);
 };
 window.tpMpCloseDetail=function(){const p=$('tpMpDetail');if(p)p.style.display='none';document.querySelectorAll('.tp-mp-row').forEach(tr=>tr.style.background='');};
-window.tpMpApprove=async function(id){if(!recGuard())return;
-  const {data,error}=await sb.schema('hr').from('manpower_requests').update({approval_status:'Approved',approved_by:state.email,approved_at:new Date().toISOString(),rejection_reason:null}).eq('id',id).select().single();
-  if(error){toast(error.message,'err');return;}
-  const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)MP_RECORDS[idx]=data;
-  toast('Approved');tpMpRender();tpMpShowDetail(id);
-};
 /* Opening/closing hiring reuses hr.set_hiring_open exactly as it always did — that RPC already
    flips status Open/Filled and is what hr.public_position (and so career-apply / career-position.html)
    gates on, so this is the real "take the page down" switch, not just a label change here. */
@@ -1474,46 +1465,6 @@ window.tpMpReopenHiring=async function(id){
     const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)MP_RECORDS[idx].status='Open';
     toast('Hiring reopened');tpMpRender();tpMpShowDetail(id);
   }catch(e){toast('Could not reopen hiring: '+((e&&e.message)||e),'err');}
-};
-window.tpMpReject=function(id){if(!recGuard())return;
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-xmark"></i> Reject Hiring Request</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm"><label>Reason (optional, shown to the requester)</label><textarea id="tpRejReason" class="inp" rows="3" placeholder="Why is this being rejected?"></textarea></div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" style="background:var(--err);border-color:var(--err)" onclick="tpMpRejectConfirm(${id})"><i class="fa-solid fa-xmark"></i> Reject</button></div>`);
-};
-window.tpMpRejectConfirm=async function(id){
-  const reason=($('tpRejReason')||{}).value?.trim()||null;
-  const {data,error}=await sb.schema('hr').from('manpower_requests').update({approval_status:'Rejected',approved_by:state.email,approved_at:new Date().toISOString(),rejection_reason:reason}).eq('id',id).select().single();
-  if(error){toast(error.message,'err');return;}
-  const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)MP_RECORDS[idx]=data;
-  closeModal();toast('Rejected — regenerating the description with your reason');tpMpRender();tpMpShowDetail(id);
-  // Reject implies the draft needs to change, not just be recorded as refused -- regenerate right
-  // away with the reason folded in, then (on success) manpower-ai-generate itself flips the row
-  // back to Pending so the approver reviews a fresh version instead of a dead rejected one.
-  if(reason){
-    const rec=(MP_RECORDS||[]).find(r=>r.id===id);
-    sb.functions.invoke('manpower-ai-generate',{body:{request_id:id,requested_by:state.email||'',rejection_reason:reason}}).then(({data:gen,error})=>{
-      const rec2=(MP_RECORDS||[]).find(r=>r.id===id);if(!rec2)return;
-      if(error||!gen||gen.error){rec2.ai_status='failed';tpMpRender();return;}
-      rec2.ai_status='ready';rec2.ai_job_description=gen.job_description;rec2.ai_job_description_json=gen.job_description_json;
-      rec2.ai_platform_post_text=gen.platform_post_text;rec2.ai_creative_path=gen.creative_path;
-      if(gen.reset_to_pending){rec2.approval_status='Pending';rec2.rejection_reason=null;}
-      tpMpRender();
-    });
-    if(rec)rec.ai_status='generating';
-  }
-};
-window.tpMpDeleteOne=async function(id){if(!recGuard())return;
-  const started=tpMpCandOf(id).started;
-  if(started){
-    toast('This position cannot be deleted \u2014 '+started+' candidate'
-          +(started===1?' has':'s have')+' already started their stages','err');
-    return;
-  }
-  if(!await confirmDialog('Delete this hiring request?'))return;
-  const {error}=await sb.schema('hr').from('manpower_requests').delete().eq('id',id);
-  if(error){toast(error.message,'err');return;}
-  MP_RECORDS=(MP_RECORDS||[]).filter(r=>r.id!==id);
-  tpMpCloseDetail();toast('Deleted');tpMpRender();
 };
 
 /* ── Referral Tab ── */
@@ -1805,22 +1756,6 @@ window.tpRefConnectGo=async function(id){
   closeModal();
   toast('Connected to '+(req&&req.job_title||'position')+' and added to Interviews');tpRefRender();
 };
-window.tpRefReject=async function(id){if(!rtRefConnectGuard())return;
-  if(!await confirmDialog('Reject this referral?'))return;
-  const {data,error}=await sb.schema('hr').from('referrals').update({approval_status:'Rejected',approved_by:state.email,approved_at:new Date().toISOString()}).eq('id',id).select().single();
-  if(error){toast(error.message,'err');return;}
-  const idx=(TP_REF_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)TP_REF_RECORDS[idx]=data;
-  toast('Rejected');tpRefRender();
-  /* The referrer is told, and nobody else. HR and administrators act on these all day; copying
-     them on their own decision is noise they would learn to ignore. Sent from ai@ rather than from
-     whoever pressed the button, because this is the company's answer and not one approver's
-     opinion - putting a name on it invites the referrer to go and argue with a colleague. */
-  if(String(data.referred_by||'').trim()){
-    const r=await hrNotify({kind:'referral_decided',approved:false,
-      referrer_email:data.referred_by,referrer_name:'',candidate_name:data.referred_name||''});
-    if(r&&r.ok) toast('The person who referred them has been told','ok');
-  }
-};
 
 /* ── Interview Tracker v2 ──
    Shows the Hold-only baseline (kept from before the reset) plus every fresh candidate created
@@ -1898,6 +1833,114 @@ async function tpTracker(){
   TP_TR_SEL=new Set();
   tpTrRender();
 }
+/* ── ARCHIVE (23 Nov 2026) ──────────────────────────────────────────────────────────────
+   Everyone who was rejected: rejected candidates, and referrals that were turned down. Same columns
+   as Candidates. The Stage box offers Selected, Hold or Interview Scheduled; choosing one brings the
+   person back to Candidates at that stage, and Monthly Progress counts them again (its numbers are
+   counted from the candidate records). A rejected referral has no candidate record yet, so bringing
+   one back asks which open position they are for, then connects them and sets the stage. */
+const TP_AR_STAGES=['Selected','Hold','Interview Scheduled'];
+let TP_AR_ROWS=null, TP_AR_REFS=null;
+async function tpArchive(){
+  const b=$('recBody'); if(!b)return;
+  b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+  try{
+    const [tr,rf]=await Promise.all([
+      sb.schema('hr').from('interview_tracker').select('*,candidates!interview_tracker_candidate_id_fkey(tracker_row_id,approval_status,resume_id)').eq('feedback','Rejected').order('id',{ascending:false}),
+      sb.schema('hr').from('referrals').select('*').eq('approval_status','Rejected').is('candidate_id',null).order('id',{ascending:false})
+    ]);
+    if(tr.error) throw tr.error; if(rf.error) throw rf.error;
+    TP_AR_ROWS=tr.data||[]; TP_AR_REFS=rf.data||[];
+  }catch(e){ b.innerHTML='<div class="empty" style="padding:40px;color:#c83232">'+esc(e.message||String(e))+'</div>'; return; }
+  tpArRender();
+}
+function tpArRender(){
+  const b=$('recBody'); if(!b)return;
+  const canAct=recCanWrite();
+  const sel=function(onchange){
+    return canAct
+      ? '<select class="tp-sel" onchange="'+onchange+'"><option value="" selected disabled hidden>Rejected</option><optgroup label="Bring back as…">'
+          +TP_AR_STAGES.map(function(x){return '<option>'+x+'</option>';}).join('')+'</optgroup></select>'
+      : tpTrFbTag('Rejected');
+  };
+  const dateOf=function(d){ return d?new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—'; };
+  const cand=(TP_AR_ROWS||[]).map(function(r){
+    return '<tr><td style="font-weight:600">'+esc(r.candidate_name||'—')+'</td>'
+      +'<td>'+(r.position?esc(r.position):'<span style="color:var(--slate)">No position yet</span>')+'</td>'
+      +'<td style="font-size:12px;color:var(--slate)">'+esc(r.source||'—')+'</td>'
+      +'<td style="font-size:12px">'+esc(r.entity||'—')+'</td>'
+      +'<td style="font-family:monospace;font-size:12px">'+esc(r.number||'—')+'</td>'
+      +'<td style="font-size:12px">'+(r.email?'<a href="mailto:'+esc(r.email)+'" style="color:var(--brand)">'+esc(r.email)+'</a>':'—')+'</td>'
+      +'<td style="font-size:12px;color:var(--slate);white-space:nowrap">'+esc(r.scheduled_date||'—')+'</td>'
+      +'<td>'+sel('tpArBack('+r.id+',this.value)')+'</td>'
+      +'<td class="tp-note" title="'+esc(r.notes||'')+'">'+esc(r.notes||'—')+'</td></tr>';
+  });
+  const refs=(TP_AR_REFS||[]).map(function(r){
+    const note='Referred by '+(r.referred_by||'someone')+(r.notes?' — '+r.notes:'')+(r.rejection_reason?' · Rejected: '+r.rejection_reason:'');
+    return '<tr><td style="font-weight:600">'+esc(r.referred_name||'—')+'</td>'
+      +'<td>'+(r.position?esc(r.position):'<span style="color:var(--slate)">No position yet</span>')+'</td>'
+      +'<td style="font-size:12px;color:var(--slate)"><span class="tag t-gray">Referral</span></td>'
+      +'<td style="font-size:12px">—</td>'
+      +'<td style="font-family:monospace;font-size:12px">'+esc(r.referred_phone||'—')+'</td>'
+      +'<td style="font-size:12px">'+(r.referred_email?'<a href="mailto:'+esc(r.referred_email)+'" style="color:var(--brand)">'+esc(r.referred_email)+'</a>':'—')+'</td>'
+      +'<td style="font-size:12px;color:var(--slate);white-space:nowrap">'+dateOf(r.created_at)+'</td>'
+      +'<td>'+sel('tpArRefBack('+r.id+',this.value)')+'</td>'
+      +'<td class="tp-note" title="'+esc(note)+'">'+esc(note)+'</td></tr>';
+  });
+  const n=cand.length+refs.length;
+  b.innerHTML=TP_SEL_CSS+TP_NOTE_CSS
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div class="sec-title" style="margin:0">Archive <span class="tag t-gray" style="margin-left:4px">'+n+'</span></div></div>'
+    +'<div style="font-size:12px;color:var(--slate);margin-bottom:12px">Rejected candidates and rejected referrals. Choose <b>Selected</b>, <b>Hold</b> or <b>Interview Scheduled</b> to bring someone back to Candidates — Monthly Progress updates with them.</div>'
+    +'<div style="overflow-x:auto"><table class="tbl" style="min-width:1200px"><thead><tr>'
+    +'<th>Candidate</th><th>Position</th><th>Source</th><th>Recruiter</th><th>Phone</th><th>Email</th><th>Date &amp; Time</th><th style="width:170px">Stage</th><th>Notes</th>'
+    +'</tr></thead><tbody>'
+    +(n?cand.concat(refs).join(''):'<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--slate)">Nobody has been rejected</td></tr>')
+    +'</tbody></table></div>';
+}
+window.tpArBack=async function(trackerId,stage){
+  if(!recGuard()||!stage)return;
+  const r=(TP_AR_ROWS||[]).find(function(x){return x.id===trackerId;}); if(!r){tpArRender();return;}
+  if(!await confirmDialog('Bring '+(r.candidate_name||'this candidate')+' back as '+stage+'? They move to Candidates and count in Monthly Progress again.',
+      {title:'Bring back',icon:'fa-rotate-left',okLabel:'Bring back',danger:false})){ tpArRender(); return; }
+  let err=null;
+  if(r.candidate_id){
+    const {error}=await sb.schema('hr').rpc('candidate_set_stage',{p_id:r.candidate_id,p_stage:stage}); err=error;
+  }else{
+    const {data,error}=await sb.schema('hr').from('interview_tracker').update({feedback:stage,status:stage}).eq('id',trackerId).select('id');
+    err=error||((!data||!data.length)?{message:'nothing was saved - you may not have permission'}:null);
+  }
+  if(err){ toast('Could not bring them back: '+err.message,'err'); tpArRender(); return; }
+  toast((r.candidate_name||'Candidate')+' is back in Candidates as '+stage,'ok');
+  TP_TR_RECORDS=null; tpArchive();
+};
+window.tpArRefBack=async function(refId,stage){
+  if(!recGuard()||!stage)return;
+  const r=(TP_AR_REFS||[]).find(function(x){return x.id===refId;}); if(!r){tpArRender();return;}
+  try{ await tpEnsurePositions(); }catch(_e){}
+  const open=tpTrOpenPositions();
+  window._tpArPending={refId:refId,stage:stage};
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-rotate-left"></i> Bring back '+esc(r.referred_name||'referral')+'</h3><span class="x" onclick="closeModal();tpArRender()">&times;</span></div>'
+    +'<div class="modal-body frm"><label>Which open position are they for? *</label>'
+    +'<select id="tpArPos" class="sel">'+(open.length===1?'':'<option value="">— Select an open position —</option>')
+    +open.map(function(q){return '<option value="'+q.id+'">'+esc(q.job_title||'—')+(q.department?' · '+esc(q.department):'')+'</option>';}).join('')+'</select>'
+    +(open.length?'<div style="font-size:11.5px;color:var(--slate);margin-top:6px">They are added to Candidates for this position as <b>'+esc(stage)+'</b>.</div>'
+      :'<div style="font-size:11.5px;color:var(--err);margin-top:6px">No open positions — raise a Hiring Request first.</div>')
+    +'</div><div class="modal-foot"><button class="btn" onclick="closeModal();tpArRender()">Cancel</button>'
+    +'<button class="btn btn-primary" id="tpArGo" onclick="tpArRefBackGo()"'+(open.length?'':' disabled')+'><i class="fa-solid fa-check"></i> Bring back</button></div>');
+};
+window.tpArRefBackGo=async function(){
+  const pend=window._tpArPending||{}; const reqId=parseInt((($('tpArPos')||{}).value)||'');
+  if(!reqId){ toast('Pick a position','err'); return; }
+  const btn=$('tpArGo'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+  let entity=null; try{ entity=await tpEntityForMe(); }catch(_e){}
+  const {data:rec,error}=await sb.schema('hr').rpc('referral_approve_connect',{p_ref_id:pend.refId,p_req_id:reqId,p_entity:entity});
+  if(error||!rec||!rec.candidate_id){ toast('Could not bring them back: '+((error&&error.message)||'no candidate was created'),'err'); if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Bring back';} return; }
+  const {error:se}=await sb.schema('hr').rpc('candidate_set_stage',{p_id:rec.candidate_id,p_stage:pend.stage});
+  closeModal();
+  if(se) toast('Back in Candidates, but the stage could not be set to '+pend.stage+': '+se.message,'warn');
+  else toast((rec.referred_name||'Referral')+' is back in Candidates as '+pend.stage,'ok');
+  TP_TR_RECORDS=null; tpArchive();
+};
 /* ONE LOOK FOR THE TWO EDITABLE CELLS. They were native selects with a couple of inline rules,
    so Source and Stage were different widths and different heights in the same row and neither
    lined up with the text beside them. */
@@ -1918,7 +1961,8 @@ function tpTrFbTag(s){
 }
 function tpTrRender(){
   const b=$('recBody'); if(!b)return;
-  const all=TP_TR_RECORDS||[];
+  /* REJECTED PEOPLE LIVE IN ARCHIVE (23 Nov 2026), not here. From there they can be brought back. */
+  const all=(TP_TR_RECORDS||[]).filter(function(r){return String(r.feedback||'').trim()!=='Rejected';});
   const posFilter=TP_TR_POS_FILTER;
   const rows=posFilter
     ? all.filter(function(r){return String(r.position||'')===posFilter;})
@@ -1931,7 +1975,7 @@ function tpTrRender(){
      refuse them only after they had written the message. */
   const canMail=rtCanManage();
   b.innerHTML=TP_SEL_CSS+TP_NOTE_CSS+`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
-    <div class="sec-title" style="margin:0">Interviews <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
+    <div class="sec-title" style="margin:0">Candidates <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
     <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-primary" onclick="tpTrAdd()"><i class="fa-solid fa-plus"></i> Add</button>
       ${canAct?`<button class="btn" id="tpTrEditBtn" disabled style="opacity:.4" title="Tick one hand-added candidate to edit their details" onclick="tpTrEdit()"><i class="fa-solid fa-pen"></i> Edit</button>`:''}
@@ -1943,11 +1987,11 @@ function tpTrRender(){
     <i class="fa-solid fa-filter"></i> Showing only <b>${esc(posFilter)}</b> — ${rows.length} of ${all.length}
     <button class="btn btn-sm" style="margin-left:auto;padding:2px 10px" onclick="tpTrClearPosFilter()">Show all</button>
   </div>`:''}
-  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">Everyone who applied on the Careers page, was uploaded as a CV, was referred, or was added here by hand.</div>
+  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">Everyone who applied on the Careers page, was uploaded as a CV, was referred, or was added here by hand. Rejected candidates move to the Archive tab.</div>
   <div style="overflow-x:auto"><table class="tbl" style="min-width:1200px">
     <thead><tr>
       ${canAct?'<th style="width:32px"><input type="checkbox" onchange="tpTrToggleAll(this)"></th>':''}
-      <th>Candidate</th><th>Position</th><th>Source</th><th>Handled By</th><th>Phone</th><th>Email</th><th>Date &amp; Time</th><th style="width:170px">Stage</th><th>Notes</th>
+      <th>Candidate</th><th>Position</th><th>Source</th><th>Recruiter</th><th>Phone</th><th>Email</th><th>Date &amp; Time</th><th style="width:170px">Stage</th><th>Notes</th>
     </tr></thead>
     <tbody>${rows.length?rows.map(r=>`<tr>
       ${canAct?`<td><input type="checkbox" class="tp-tr-cb" data-id="${r.id}" data-email="${esc(r.email||'')}" onchange="tpTrRowCheck(this)"></td>`:''}
@@ -1957,13 +2001,8 @@ function tpTrRender(){
            invisible here: a waiting candidate looked exactly like an approved one, and the first
            anybody heard of it was the Email window refusing to list them. The chip says it where
            the person is, and the tooltip says where to go and do something about it. -->
-      <td style="font-weight:600">${esc(r.candidate_name||'—')}${(()=>{
-        const ap=String((r.candidates&&r.candidates.approval_status)||'Approved');
-        if(ap==='Pending')return ' <span class="tag t-amber" style="font-size:10px" title="Waiting to be approved in Accountability \u203a Pending Approval \u2014 they cannot be sent a test until then">to approve</span>';
-        if(ap==='Rejected')return ' <span class="tag t-red" style="font-size:10px" title="This candidate was not approved">not approved</span>';
-        return '';
-      })()}</td>
-      <td>${esc(r.position||'—')}</td>
+      <td style="font-weight:600">${esc(r.candidate_name||'—')}</td>
+      <td>${r.position?esc(r.position):'<span style="color:var(--slate)">No position yet</span>'}</td>
       <!-- SOURCE IS EDITABLE, THE SAME WAY STAGE IS. It was printed as text, so a row that came in
            with the wrong source - or none, which is what a hand-added candidate starts with - could
            only be corrected in the database. It is the field Monthly Progress and every "where do
@@ -2080,19 +2119,24 @@ function tpTrHandAdded(r){
 /* EDITING A HAND-ADDED CANDIDATE. Name, phone, email and notes - the things that are typed in and
    so get typed wrong. Position is not offered: it decides which month and which position they are
    counted under, so moving them is delete-and-add, not an edit. Allowed at any stage. */
-window.tpTrEdit=function(){
+window.tpTrEdit=async function(){
   if(!recGuard())return;
   const r=(TP_TR_RECORDS||[]).find(x=>x.id===[...TP_TR_SEL][0]);
   if(!r||!tpTrHandAdded(r)){toast('Tick one hand-added candidate first','err');return;}
+  if(!r.position){ try{ await tpEnsurePositions(); }catch(_e){} }
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> Edit Candidate</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
     <div class="two"><div><label>Candidate Name *</label><input id="tpTrEName" class="inp" value="${esc(r.candidate_name||'')}"></div>
-    <div><label>Position</label><input class="inp" value="${esc(r.position||'')}" disabled title="To move someone to another position, delete them and add them again"></div></div>
+    <div><label>Position</label>${r.position
+      ? `<input class="inp" value="${esc(r.position||'')}" disabled title="To move someone to another position, delete them and add them again">`
+      : `<select id="tpTrEPos" class="sel"><option value="">— No position yet —</option>${tpTrOpenPositions().map(q=>`<option value="${q.id}">${esc(q.job_title||'—')}</option>`).join('')}</select>`}</div></div>
     <div class="two"><div><label>Phone</label><input id="tpTrEPhone" class="inp" value="${esc(r.number||'')}"></div><div><label>Email</label><input id="tpTrEEmail" class="inp" value="${esc(r.email||'')}"></div></div>
     <label>Notes</label><textarea id="tpTrENotes" class="inp" rows="2">${esc(r.notes||'')}</textarea>
   </div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tpTrESaveBtn" onclick="tpTrEditSave(${r.id})"><i class="fa-solid fa-check"></i> Save</button></div>`);
 };
+/* Open positions a candidate can be put on (23 Nov 2026: candidates may be added with no position). */
+function tpTrOpenPositions(){ return (MP_RECORDS||[]).filter(q=>(q.status||'Open')==='Open'&&q.approval_status!=='Rejected'); }
 window.tpTrEditSave=async function(trackerId){
   if(!recGuard())return;
   const r=(TP_TR_RECORDS||[]).find(x=>x.id===trackerId); if(!r)return;
@@ -2118,6 +2162,19 @@ window.tpTrEditSave=async function(trackerId){
         +(back?' - and the Interviews row could not be put back, so it may show the new details: '+back.message:''),'err');
       if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Save';}
       return;
+    }
+  }
+  /* GIVING A POSITION LATER. Someone added with "No position yet" gets one here; that also puts them
+     on that position's Monthly Progress row. */
+  const posPick=parseInt(($('tpTrEPos')||{}).value||'')||null;
+  if(posPick&&!r.position&&r.candidate_id){
+    const q=tpTrOpenPositions().find(x=>x.id===posPick);
+    const rr=await sb.schema('hr').rpc('tracker_row_for_request',{p_req_id:posPick,p_month:null});
+    if(rr.error||!q){ toast('Details saved, but the position could not be set: '+((rr.error&&rr.error.message)||'that position is not open'),'warn'); }
+    else{
+      const {data:pc,error:pe}=await sb.schema('hr').from('candidates').update({manpower_request_id:posPick,position:q.job_title,tracker_row_id:rr.data}).eq('id',r.candidate_id).select('id');
+      if(pe||!pc||!pc.length){ toast('Details saved, but the position could not be set: '+((pe&&pe.message)||'no permission'),'warn'); }
+      else{ await sb.schema('hr').from('interview_tracker').update({position:q.job_title}).eq('id',trackerId); r.position=q.job_title; if(r.candidates) r.candidates.tracker_row_id=rr.data; }
     }
   }
   Object.assign(r,{candidate_name:name,number:phone,email,notes});
@@ -2196,13 +2253,14 @@ window.tpTrSource=async function(trackerId,value){
 window.tpTrAdd=async function(){
   if(!recGuard())return;
   await tpEnsurePositions();
-  const openReqs=(MP_RECORDS||[]).filter(r=>r.ai_job_description_json);
+  // Only open positions (closed ones used to appear too). "No position yet" lets HR add someone first and choose later.
+  const openReqs=(MP_RECORDS||[]).filter(r=>(r.status||'Open')==='Open'&&r.approval_status!=='Rejected');
   const entities=(window._tpEntities||[]);
   const sources=(window._tpSources||[]);
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Candidate</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
     <div class="two"><div><label>Candidate Name *</label><input id="tpTrName" class="inp"></div>
-    <div><label>Position *</label><select id="tpTrPos" class="sel"><option value="">— Select —</option>${openReqs.map(r=>`<option value="${r.id}">${esc(r.job_title||'—')}</option>`).join('')}</select></div></div>
+    <div><label>Position</label><select id="tpTrPos" class="sel"><option value="none">— No position yet —</option>${openReqs.map(r=>`<option value="${r.id}">${esc(r.job_title||'—')}</option>`).join('')}</select></div></div>
     <!-- ENTITY IS NOT ASKED FOR. It is who handled this candidate, and that is whoever is filling
          this form in - asking them to pick themselves from a list is a question with one right
          answer. It is recorded from the signed-in user instead. -->
@@ -2283,12 +2341,16 @@ window.tpTrSrcNewSave=async function(){
 };
 window.tpTrSave=async function(){
   const name=($('tpTrName')||{}).value?.trim();
-  const reqId=parseInt(($('tpTrPos')||{}).value||'');
-  if(!name||!reqId){toast('Name and Position are required','err');return;}
-  const req=(MP_RECORDS||[]).find(r=>r.id===reqId);
+  const reqId=parseInt(($('tpTrPos')||{}).value||'')||null;   // null = no position yet
+  if(!name){toast('Name is required','err');return;}
+  const req=reqId?(MP_RECORDS||[]).find(r=>r.id===reqId):null;
   const btn=$('tpTrSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
-  const {data:rowId,error:rrErr}=await sb.schema('hr').rpc('tracker_row_for_request',{p_req_id:reqId,p_month:null});
-  if(rrErr){toast(rrErr.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Add';}return;}
+  let rowId=null;
+  if(reqId){
+    const rr=await sb.schema('hr').rpc('tracker_row_for_request',{p_req_id:reqId,p_month:null});
+    if(rr.error){toast(rr.error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Add';}return;}
+    rowId=rr.data;
+  }
   let source=($('tpTrSrc')||{}).value||null;
   if(source==='__new') source=null;            // the placeholder is not a source
   /* Handled By is whoever is adding them. tpEntityForMe resolves the signed-in person to an entity
@@ -2724,12 +2786,6 @@ window.tpMuEmail=async function(){
   await rtShare(true);
 };
 let TP_MU_EMAIL_POS=null;
-window.tpMuOpenMonth=async function(){
-  if(!recGuard())return;
-  const {error}=await sb.schema('hr').rpc('tracker_open_month',{p_month:null});
-  if(error){toast(error.message,'err');return;}
-  toast('Refreshed');await tpMonthlyUpdate();
-};
 // Replaces the old tpMuDeleteRow -- a filled position should be closed out, not deleted (it's
 // expected to have candidates linked, unlike the old delete which refused exactly that case).
 // Completing locks every one of this row's candidates' Feedback dropdowns in Interview Tracker
