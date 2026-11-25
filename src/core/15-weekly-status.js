@@ -1176,7 +1176,7 @@ function wmNoteRow(n,m){
   return `<div class="wm-nt ${n.solved?'solved':''}">
     <button class="ck" title="${wmIsTd(n)?(n.solved?'Done - click to mark not done':'To do - click to mark done'):(n.solved?'Solved - click to mark unsolved':'Unsolved - click to mark solved')}" onclick="wmNoteSolve(${n.id},${!n.solved})"><i class="fa-solid fa-check"></i></button>
     <div class="tx"><div class="bd">${esc(n.body)}</div>
-      <div class="mt"><span class="st ${n.solved?'y':'n'}">${wmIsTd(n)?(n.solved?'Done':'To do'):(n.solved?'Solved':'Unsolved')}</span>${from?`<span class="fr" onclick="wmOpenMeeting(${n.meeting_id})">From ${esc(wmFmtS(n.meeting_date))}</span>`:'<span>This meeting</span>'}
+      <div class="mt"><span class="st ${n.solved?'y':'n'}">${wmIsTd(n)?(n.solved?'Done':'To do'):(n.solved?'Solved':'Unsolved')}</span>${from?`<span class="fr" onclick="wmOpenMeeting(${n.meeting_id})" title="Written in the meeting of this date">${esc(wmFmtS(n.meeting_date))}</span>`:'<span>This meeting</span>'}
         <span class="by">${n.created_by?'by '+esc(wmName(n.created_by))+' · ':''}${n.created_at?esc(wmFmtS(n.created_at))+', '+esc(wmClock(n.created_at)):''}</span>${n.solved&&n.solved_at?`<span class="by">${wmIsTd(n)?'done':'solved'} ${esc(wmFmtS(n.solved_at))}</span>`:''}
         ${n.ptask_id?`<span class="tk"><i class="fa-solid fa-list-check"></i> Task for ${esc(who||'—')}${tst?' · '+tst:''}</span>`:n.solved?'':`<button class="wm-quiet" onclick="wmNoteTask(${n.id})"><i class="fa-solid fa-user-plus"></i> Make a task</button>`}
         <button class="wm-ed" title="Edit" onclick="wmNoteEdit(${n.id})"><i class="fa-solid fa-pen"></i></button>
@@ -1213,7 +1213,7 @@ function wmTdTaskRow(it,m){
   return `<div class="wm-nt wm-tdt ${it.st==='done'?'solved':''}" data-id="${it.id}" ${ed?`draggable="true" ondragstart="wmTdDrag(event,${it.id})" ondragend="wmTdDragEnd()" title="Drag to the other list"`:''}>
     <button class="ck" ${mine?`onclick="wmToggle(${it.id})" title="${it.st==='done'?'Reopen':'Mark finished'}"`:`disabled title="Only ${esc(wmName(it.delegator))}, who gave this task, can finish it"`}><i class="fa-solid fa-check"></i></button>
     <div class="tx"><div class="bd"><i class="fa-solid fa-list-check wm-tdt-ic" title="A task"></i>${esc(it.t)}</div>
-      <div class="mt"><span class="st ${pill[0]}">${pill[1]}</span><span>${it.mem.map(e=>esc(wmFirst(e))).join(', ')}</span>${due?`<span>${wmOverdue(it)?'was due':'due'} ${esc(wmFmtS(due))}</span>`:''}${from?`<span class="fr" onclick="wmOpenMeeting(${it.meeting})">From ${esc(wmFmtS(it.date))}</span>`:''}
+      <div class="mt"><span class="st ${pill[0]}">${pill[1]}</span><span>${it.mem.map(e=>esc(wmFirst(e))).join(', ')}</span>${due?`<span>${wmOverdue(it)?'was due':'due'} ${esc(wmFmtS(due))}</span>`:''}${from?`<span class="fr" onclick="wmOpenMeeting(${it.meeting})" title="Given in the meeting of this date">${esc(wmFmtS(it.date))}</span>`:''}
         ${ed?`<button class="wm-quiet wm-tdmv" onclick="wmTdMove(${it.id},'${other}')"><i class="fa-solid fa-arrow-right-arrow-left"></i> Move to ${other==='trying'?'Trying':'Target'}</button>`:''}</div></div></div>`;
 }
 // Tasks in a To-dos list look exactly like the Actions task list: grouped by person, the same row (tick,
@@ -1243,7 +1243,7 @@ function wmTdWrap(it,m,k){
 function wmTdCardOff(){ try{ return JSON.parse(localStorage.getItem('wm_td_cards')||'{}')||{}; }catch(e){ return {}; } }
 window.wmTdCardFold=function(k){ const s=wmTdCardOff(); s[k]=!s[k]; try{ localStorage.setItem('wm_td_cards',JSON.stringify(s)); }catch(e){} wmRepaintTd(); };
 const WM_TD_TAG={target:'Target',trying:'Trying',future:'Future'};
-const WM_TD_COL={target:'#5B4BE8',trying:'#3767DB',future:'#C4C8D6'};
+const WM_TD_COL={target:'#5B4BE8',trying:'#E08A1E',future:'#C4C8D6'};
 function wmTdHtml(m){
   const old=String((m.agenda_notes||{}).todos||'').trim(), fold=wmTdFoldState(), cardOff=wmTdCardOff();
   const secs=WM_TD.map(([sec,l,i,ph])=>({sec,l,i,ph,tasks:wmTdTasks(m,sec),notes:sec==='target'?[]:wmNotesFor(m,sec),off:!!fold[sec]}));
@@ -1475,7 +1475,7 @@ function wmAvatar(name,sz){ return '<span class="avatar-sm" style="background:'+
 
 function wmRow(it,forKey,showPeople,showMeeting){
   const bits=[], today=wmToday();
-  const from=(showMeeting?esc(it.kind)+', ':'')+(it.date===today?(showMeeting?'today':'Today\'s meeting'):(showMeeting?'':'From ')+esc(wmFmtS(it.date)));
+  const from=(showMeeting?esc(it.kind)+', ':'')+(it.date===today?(showMeeting?'today':'Today\'s meeting'):esc(wmFmtS(it.date)));
   bits.push(it.meeting!==WM.cur||WM.view==='all'?`<span class="from" onclick="wmOpenMeeting(${it.meeting})">${from}</span>`:`<span>${from}</span>`);
   if(showPeople) bits.push(`<span>${it.linked?it.mem.map(e=>wmAvatar(wmName(e),18)).join('')+' '+esc(it.mem.map(wmFirst).join(', ')):esc(it.owner||'No owner')}</span>`);
   else if(it.linked&&it.mem.length>1) bits.push(`<span>with ${esc(it.mem.filter(e=>'e:'+e.toLowerCase()!==forKey).map(wmFirst).join(', '))}</span>`);
@@ -2381,7 +2381,7 @@ const WM_CSS='<style id="wmCss">'
   +'.mt-shell .wm-bd-act{min-height:calc(100vh - 250px)}'
   +'.mt-shell .wm-bd-work{margin-top:16px}'
   +'.mt-shell .wm-rs{font-size:12.5px;color:var(--p);font-weight:700}'
-  +'.wm-oo-box.wm-td-box{border-left:3px solid #5B4BE8;background:#fafaff}.wm-oo-box.wm-td-box.trying{border-left-color:#3767DB;background:#f7f9ff}'
+  +'.wm-oo-box.wm-td-box{border-left:3px solid #5B4BE8;background:#fafaff}.wm-oo-box.wm-td-box.trying{border-left-color:#E08A1E;background:#fffaf3}'
   +'@media(max-width:1180px){.mt-two{grid-template-columns:1fr}}'
   +'@media(max-width:900px){.mt-shell,.mt-shell.mini{grid-template-columns:minmax(0,1fr)}.mt-fold{display:none}.mt-shell.mini .mt-side{padding:12px;align-items:center}.mt-shell.mini .mt-logo{flex-direction:row;padding:0 4px}.mt-shell.mini .mt-logo b,.mt-shell.mini .mt-nav>span{display:inline}.mt-shell.mini .mt-sl{display:none}.mt-shell.mini .mt-navs{align-items:stretch}.mt-shell.mini .mt-nav{width:auto;padding:8px 10px}.mt-shell.mini .mt-nav .mt-cnt{position:static;border:0}.mt-side{position:static;height:auto;border-right:0;border-bottom:1px solid var(--bd);border-radius:0;padding:12px;flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px;overflow:visible}.mt-logo{padding:0 4px}.mt-sl,.mt-user{display:none}.mt-navs{flex-direction:row;overflow-x:auto;width:100%;gap:4px}.mt-nav{width:auto;flex:none;padding:8px 10px}.mt-top{padding:12px 16px;flex-wrap:wrap;border-radius:0}.mt-search{width:100%;max-width:none}.mt-content{padding:16px}.mt-up{grid-template-columns:56px minmax(0,1fr);gap:12px}.mt-up>.mt-cd,.mt-up>.mt-btns,.mt-up>span{grid-column:2}.mt-rc{grid-template-columns:minmax(0,1fr) auto}.mt-rc>span:nth-child(2),.mt-rc .hide{display:none}.mt-hf,.mt-hf input{width:100%}.mt-runs{grid-template-columns:1fr}}'
   +'@media(max-width:560px){.mt-date{display:none}.mt-top-r{width:100%;justify-content:space-between}.mt-stats{grid-template-columns:1fr 1fr;gap:10px}.mt-stat b{font-size:24px}.mt-card{padding:16px}.mt-res{width:calc(100vw - 48px)}}'
@@ -2531,6 +2531,7 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-secpick{gap:0!important;border:1px solid #E3E5EC;border-radius:20px;padding:2px;background:#fff;font-size:12px;color:#7A8095}'
   +'.wm-secpick button{border:0;background:none;font:inherit;font-size:12px;font-weight:700;color:#6B7083;padding:2px 9px;border-radius:20px;cursor:pointer;margin-left:2px}'
   +'.wm-secpick button.on{background:#5B4BE8;color:#fff}'
+  +'.wm-secpick button.on[onclick*=trying]{background:#E08A1E}'
   +'@media(hover:none){.wm-tdmv{opacity:1}}'
 +'/* overtime: the step whose time is up counts on below zero until Next */'
   +'.wm-agnow.over .cd{animation:wmBlink 1s steps(2) infinite}.wm-agnow .ovl{font-style:normal}'
@@ -2545,7 +2546,7 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-tdg-h:hover{background:#EFEFF8}.wm-tdg-h.wm-tdg-p{border-left:0;cursor:default;color:#9AA0B4}'
   +'.wm-tdg-h i{color:#9AA0B4;font-size:11px}.wm-tdg-h .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
   +'.wm-tdg-h em{font-style:normal;font-size:11px;background:#fff;color:#5D6378;border-radius:20px;padding:1px 7px;letter-spacing:0}.wm-tdg-h .chev{font-size:9px}'
-  +'.wm-tdg-h.target{border-top-color:#5B4BE8}.wm-tdg-h.target i:first-child{color:#5B4BE8}.wm-tdg-h.trying{border-top-color:#3767DB}.wm-tdg-h.trying i:first-child{color:#3767DB}.wm-tdg-h.future{border-top-color:#9AA0B4}'
+  +'.wm-tdg-h.target{border-top-color:#5B4BE8}.wm-tdg-h.target i:first-child{color:#5B4BE8}.wm-tdg-h.trying{border-top-color:#E08A1E}.wm-tdg-h.trying i:first-child{color:#E08A1E}.wm-tdg-h.future{border-top-color:#9AA0B4}'
   +'.wm-tdg-h.off{flex-direction:column;align-items:center;justify-content:center;padding:9px 4px;gap:4px}.wm-tdg-h.off .t,.wm-tdg-h.off .chev{display:none}'
   +'.wm-tdg-p.who{display:flex;gap:9px;align-items:flex-start;min-width:0;padding:11px 12px;border-bottom:1px solid #F1F2F6;background:#FCFCFE}'
   +'.wm-tdg-p.who>div{min-width:0}.wm-tdg-p.who b{display:block;font-size:13px;color:#1C1F2E;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wm-tdg-p.who span{display:block;font-size:11.5px;color:#7A8095}'
@@ -2580,7 +2581,7 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-tdb-bar{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 10px}'
   +'.wm-tdb-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid #E3E5EC;border-radius:20px;background:#fff;padding:5px 11px;font:inherit;font-size:12px;font-weight:700;color:#4A4F63;cursor:pointer}'
   +'.wm-tdb-chip em{font-style:normal;font-size:11px;background:#F0F1F5;border-radius:20px;padding:0 7px;color:#5D6378}'
-  +'.wm-tdb-chip.target i{color:#5B4BE8}.wm-tdb-chip.trying i{color:#3767DB}.wm-tdb-chip.future i{color:#9AA0B4}'
+  +'.wm-tdb-chip.target i{color:#5B4BE8}.wm-tdb-chip.trying i{color:#E08A1E}.wm-tdb-chip.future i{color:#9AA0B4}'
   +'.wm-tdb-chip.off{background:#F6F7FA;color:#9AA0B4;text-decoration:line-through}.wm-tdb-chip.off i{color:#C4C8D6}'
   +'.wm-tdb-chip.drop{outline:2px dashed #5B4BE8;outline-offset:1px;background:#F4F2FF}'
   +'.wm-tdb{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(340px,100%),1fr));gap:12px;align-items:start}'
@@ -2595,7 +2596,7 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-tdb-c .wm-v6 .task .st.p,.wm-tdb-c .wm-v6 .task .mt .ok,.wm-tdb-ns .st.n{display:none}'
   +'@media(min-width:601px){.wm-tdb-c .wm-v6 .task .st.o{display:none}}'
   +'.wm-tdb-tag{flex:none;font-size:9.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;border-radius:5px;padding:1px 5px;background:#F0F1F5;color:#5D6378}'
-  +'.wm-tdb-tag.target{background:#EEEBFF;color:#5B4BE8}.wm-tdb-tag.trying{background:#E7F1FB;color:#3767DB}'
+  +'.wm-tdb-tag.target{background:#EEEBFF;color:#5B4BE8}.wm-tdb-tag.trying{background:#FFF1E0;color:#C46E12}'
   +'.wm-tdb-ns{padding:6px 12px 4px;border-top:1px solid #F4F5F8}.wm-tdb-ns:first-of-type{border-top:0}.wm-tdb-ns .wm-nt-add{margin:4px 0 2px}'
   +'.wm-tdb-none{grid-column:1/-1}.wm-tdb-none .wm-td-empty{padding:12px}'
   +'.wm-cap-in .wm-cap-sec{flex:none;display:inline-flex;align-items:center;margin:0 8px}'
