@@ -609,6 +609,8 @@ function notifGeneralMeta(n){
   if(n.kind==='media_digest')return {icon:'fa-stamp',cls:'t-amber',text:n.body||'Photos waiting for approval',taskId:null,go:"notifOpenMedia('review')"};
   if(n.kind==='media_rejected')return {icon:'fa-circle-xmark',cls:'t-red',text:n.body||'Photos rejected',taskId:null,go:"notifOpenMedia('upload')"};
   if(n.kind==='media_published')return {icon:'fa-circle-check',cls:'t-green',text:'Photos published',taskId:null,go:"notifOpenMedia('upload')"};
+  // Every 15 days: Dream Gurukul flats, blocks and project whose progress photos are 15+ days old (cust.photo_update_reminder_tick).
+  if(n.kind==='media_update_due')return {icon:'fa-camera',cls:'t-amber',text:'Progress photos due for an update',taskId:null,go:"notifOpenMedia('upload')"};
   return {icon:'fa-bell',cls:'t-gray',text:n.body||'Notification',taskId:n.task_id||null};
 }
 // Opens Customer Portal Admin > Photos & Videos: Review for an approver's "to approve", the upload

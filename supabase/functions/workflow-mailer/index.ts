@@ -154,7 +154,8 @@ Deno.serve(async (req)=>{
     let n:any=null;
     try{ const r=await fetch(SB+'/rest/v1/notifications?id=eq.'+id+'&select=id,recipient,kind,title,body,created_at',{headers:AP}); const rows=await r.json(); n=Array.isArray(rows)?rows[0]:null; }catch(_){}
     if(!n) return j({error:'not found'},404);
-    const KINDS = ['media_pending','media_rejected','media_published'];
+    // media_update_due: the 15-day "progress photos are due" reminder (20261125200000_photo_update_reminder.sql)
+    const KINDS = ['media_pending','media_rejected','media_published','media_update_due'];
     if(KINDS.indexOf(n.kind)===-1) return j({error:'not a photo approval notice'},400);
     if(Date.now()-new Date(n.created_at).getTime() > 15*60*1000) return j({ok:true,skipped:'too old'});
     // Claim it: the primary key makes a second call for the same id a no-op.
@@ -166,10 +167,12 @@ Deno.serve(async (req)=>{
     if(!mTo) return j({error:'no recipient'},400);
     const review = n.kind==='media_pending';
     const link = PORTAL+'/custportal-admin.html#/3'+(review?'/review':'');
+    const due = n.kind==='media_update_due';
     const tone = n.kind==='media_rejected' ? {c:'#b91c1c',bg:'#fef2f2',bar:'#e0121c',label:'Rejected'}
                : n.kind==='media_published' ? {c:'#15803d',bg:'#f0fdf4',bar:'#16a34a',label:'Published'}
+               : due ? {c:'#92400e',bg:'#fffbeb',bar:'#f59e0b',label:'Photo update due'}
                : {c:'#92400e',bg:'#fffbeb',bar:'#f59e0b',label:'Waiting for your approval'};
-    const btn = review ? 'Review now' : 'Open Photos & Videos';
+    const btn = review ? 'Review now' : due ? 'Upload photos' : 'Open Photos & Videos';
     const mSubject = String(n.title||'Construction photos');
     const mText = 'Hello,\n\n'+mSubject+'\n\n'+String(n.body||'')+'\n\n'+btn+': '+link+'\n\nJAIN-E Customer Portal (automated message, please do not reply).';
     const head = HEADER.replace('>Workflow<','>Construction Photos<');
@@ -179,7 +182,8 @@ Deno.serve(async (req)=>{
       +"<div style='margin:0 0 18px;padding:14px 16px;background:"+tone.bg+";border-left:3px solid "+tone.bar+";border-radius:6px'>"
       +"<div style='font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:"+tone.c+";margin-bottom:5px'>"+esc(tone.label)+"</div>"
       +"<div style='color:#0f172a;font-size:15px;font-weight:600;line-height:1.45'>"+esc(mSubject)+"</div>"
-      +(n.body?"<div style='color:#334155;font-size:14px;line-height:1.55;margin-top:6px'>"+esc(n.body)+"</div>":"")
+      // pre-line keeps the reminder's one-line-per-block list readable
+      +(n.body?"<div style='color:#334155;font-size:14px;line-height:1.55;margin-top:6px;white-space:pre-line'>"+esc(n.body)+"</div>":"")
       +"</div><div style='margin:4px 0'><a href='"+link+"' style='display:inline-block;background:#e0121c;color:#ffffff;text-decoration:none;padding:10px 20px;border-radius:8px;font-size:14px;font-weight:600'>"+esc(btn)+"</a></div></div>"
       +foot+"</div></div>";
     let client:any=null;
