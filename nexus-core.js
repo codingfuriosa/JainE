@@ -1294,13 +1294,15 @@ const FEEDBACK_HUB_ADMIN='ayushruia1@gmail.com';
    2026-11-03: Manash Choudhury (digitalmarketing@), TEMPORARILY, on the Administrator's word - take him
    off again when asked. Keep this list and the one in feedback.is_system_rater() the same people. */
 const SYSTEM_FEEDBACK_EXTRA=['digitalmarketing@thejaingroup.com'];
-function fhMyDepts(){ const d=state.profile&&state.profile.department; return Array.isArray(d)?d:(d?[d]:[]); }
+// the profile's departments, else the JainE user record's (25 Nov 2026: jaingroupcaller11 has no profile row)
+function fhMyDepts(){ let d=state.profile&&state.profile.department; if(!d||(Array.isArray(d)&&!d.length)) d=state.roles&&state.roles.department; return Array.isArray(d)?d:(d?[d]:[]); }
 function fhMe(){ return String(state.email||'').trim().toLowerCase(); }
 function fhCanQrForms(){ return FEEDBACK_HUB_PEOPLE.indexOf(fhMe())!==-1; }
 function fhIsSystems(){ return fhMe()===FEEDBACK_HUB_ADMIN||fhMyDepts().indexOf('Systems')!==-1; }
 // Systems people (the Administrator included) post and read System Feedbacks; they never rate them -
 // not even system.admin@, who is also listed under Sales and Pre Sales.
-function fhIsRater(){ if(fhIsSystems()) return false; return SYSTEM_FEEDBACK_EXTRA.indexOf(fhMe())!==-1||fhMyDepts().some(function(d){ return d==='Sales'||d==='Pre Sales'; }); }
+// 25 Nov 2026: Post Sales rate too - only the feedbacks addressed to Post Sales (the database decides: feedback.item_for_me)
+function fhIsRater(){ if(fhIsSystems()) return false; return SYSTEM_FEEDBACK_EXTRA.indexOf(fhMe())!==-1||fhMyDepts().some(function(d){ return d==='Sales'||d==='Pre Sales'||d==='Post Sales'; }); }
 /* ACCOUNTS FILL THE FORMS IN; THEY DO NOT BUILD THEM (18 Nov 2026).
    The whole Accounts department, by department rather than by name - there are eight of them and
    the list would go stale the first time somebody joined. They get the forms and the answers given:
@@ -3298,7 +3300,7 @@ async function legalNav(reuse){
     return `<div class="sn-tree-node" style="margin-left:${depth*13}px">
       <div class="sn-item ${active?'active':''}" onclick="legalSelectCat(${node.id})">
         <span>${caret} ${esc(node.name)}</span>
-        <span class="sn-actions"><span class="ct">${totals[node.id]||0}</span><i class="fa-solid fa-plus sn-add" title="Add category inside ${esc(node.name)}" onclick="event.stopPropagation();docNewFolder('Legal',${node.id},'${esc(node.name).replace(/'/g,"\\'")}')"></i></span>
+        <span class="sn-actions"><span class="ct">${totals[node.id]||0}</span><i class="fa-solid fa-plus sn-add" title="Add category inside ${esc(node.name)}" onclick="event.stopPropagation();docNewFolder('Legal',${node.id},'${esc(node.name).replace(/'/g,"\\'")}')"></i>${!hasKids&&!(totals[node.id]||0)?`<i class="fa-solid fa-trash-can sn-add sn-del" title="Delete this empty folder" onclick="event.stopPropagation();legalDeleteFolder(${node.id},'${esc(node.name).replace(/'/g,"\\'")}')"></i>`:''}</span>
       </div>
       ${kids}
     </div>`;
@@ -3308,6 +3310,25 @@ async function legalNav(reuse){
     `<div class="sn-tree">${roots.map(r=>renderNode(r,0)).join('')}</div>`+
     `<div class="sn-item" style="color:var(--brand)" onclick="docNewFolder('Legal',null,null)"><span><i class="fa-solid fa-plus"></i> Add main folder</span></div>`;
 }
+/* DELETE AN EMPTY LEGAL FOLDER (26 Nov 2026, Ayush: "I can't delete a folder made in Legal which is actually independent" -
+   Legal could add folders but never remove one). Only a folder with nothing in it: the bin shows on a folder with no
+   documents and no folders inside, and before deleting the database is asked again - documents, sub-folders, and whether
+   a Legal MIS case keeps its files there. Anything found and the folder stays. */
+window.legalDeleteFolder=async function(id,name){
+  const [{count:docs,error:e1},{count:kids,error:e2},{count:cases,error:e3}]=await Promise.all([
+    sb.schema('doc').from('documents').select('id',{count:'exact',head:true}).eq('folder_id',id),
+    sb.schema('doc').from('folders').select('id',{count:'exact',head:true}).eq('parent_id',id),
+    sb.from('mis_case_folders').select('id',{count:'exact',head:true}).eq('doc_folder_id',id)]);
+  if(e1||e2){ toast('Could not check the folder: '+((e1||e2).message),'err'); return; }
+  const why=[docs?docs+' document'+(docs===1?'':'s'):'',kids?kids+' folder'+(kids===1?'':'s'):'',!e3&&cases?'a Legal MIS case keeps its files here':''].filter(Boolean);
+  if(why.length){ toast('"'+name+'" is not empty - it has '+why.join(', ')+'. Move or remove those first.','warn'); return; }
+  if(!await confirmDialog('Delete the empty folder "'+name+'" from Legal?',{title:'Delete folder',icon:'fa-trash-can',okLabel:'Delete folder',danger:true})) return;
+  const {data,error}=await sb.schema('doc').from('folders').delete().eq('id',id).select('id');
+  if(error||!data||!data.length){ toast('Could not delete the folder: '+((error&&error.message)||'you may not have permission to change Legal folders'),'err'); return; }
+  if(DOC.cat&&Number(DOC.cat)===id){ toast('Folder deleted','ok'); location.hash='#/legal'; return; }
+  toast('Folder deleted','ok'); legalNav(false);
+  try{ usageQueue('legal.folder_deleted','delete',{folder_id:String(id),name:String(name)}); }catch(_e){}
+};
 window.legalToggleExpand=function(id){if(DOC.legalExpanded.has(id))DOC.legalExpanded.delete(id);else DOC.legalExpanded.add(id);legalNav(true);};
 window.legalSelectCat=function(id){location.hash='#/legal/cat/'+id;};
 
@@ -42086,12 +42107,12 @@ function caPaint(){
       if(R.st==='err') return dash0('Meta did not give the reach: '+(R.why||'')); return R.v==null?dash0('No reach from Meta for these dates'):'<td>'+fmt(R.v)+'</td>'; };
     const fh=function(t,title){ return '<th'+(title?' title="'+esc(title)+'"':'')+'>'+t+'</th>'; };
     const fbHead=function(name){ return '<tr><th class="ca-nm">'+name+'</th>'+fh('Spend')+fh('Leads Generated','Leads of lead / chat campaigns - Ads Manager\x27s Results')+fh('CPL','Spend per lead generated')
-      +ct('Qualified','Qualified leads (CRM)')+ct('QL%','Qualified leads (CRM) as a share of the leads generated')+ct('CPQL','Spend per qualified lead (CRM)')+ct('Site Visited','Site visits (CRM)')+ct('Lost','Lost (CRM)')
+      +ct('CRM Leads','Leads the CRM ties to this row (after its filtering) - can differ from Meta\x27s count')+ct('Qualified','Qualified leads (CRM)')+ct('QL%','Qualified leads as a share of CRM leads - both from the CRM')+ct('CPQL','Spend per qualified lead (CRM)')+ct('Site Visited','Site visits (CRM)')+ct('Lost','Lost (CRM)')
       +fh('ThumbStop %','3-second video plays as a share of impressions')+fh('CTL %','Leads generated as a share of clicks')+fh('CTR %','Clicks as a share of impressions')
       +fh('Cost Per 1K Reach','Spend per 1,000 people reached')+fh('Impressions')+fh('Reach','People reached in these dates, from Meta')
       +fh('25% Play','Video plays watched to 25%')+fh('50% Play','Video plays watched to 50%')+fh('75% Play','Video plays watched to 75%')+fh('100% Play','Video plays watched to the end')
       +fh('25% Play %','People who watched to 25% as a share of the people reached')+fh('50% Play %','People who watched to 50% as a share of the people reached')+fh('75% Play %','People who watched to 75% as a share of the people reached')+fh('100% Play %','People who watched to the end as a share of the people reached')+xHead(fbXa)+'</tr>'; };
-    const fbXa=FB?caXcList('ads'):[], NFB=23+fbXa.length;
+    const fbXa=FB?caXcList('ads'):[], NFB=24+fbXa.length;
     const fbCols=function(t,w,x,v){ w=w||{}; v=v||{};
       const hasC=!!(CR&&x&&x.t), c=hasC?x.t:{}, cw=hasC?(x.w||{}):{}, why=!CR?'CRM figures are read at night - they show from the next morning':((x&&x.why)||'');
       const crm=function(val,was,fmt,up){ return hasC?cell(val,was,fmt,up).replace('<td>','<td class="ca-crm">'):dash0(why,'ca-crm'); };
@@ -42101,7 +42122,10 @@ function caPaint(){
       return cell(t.spend,w.spend,obMoney,null,true)
         +(cmpOn?cell(t.ln,w.ln,function(n){ return caLeads(n,t.pl); },true).replace('</td>',(t.tag||'')+'</td>'):'<td>'+t.lead+'</td>')
         +cell(t.cpl,w.cpl,obMoney,false)
-        +crm(c.ql,cw.ql,obNum,true)+crm(pct(c.ql,ln),pct(cw.ql,w.ln),pc0,true)+crm(c.cpql,cw.cpql,obMoney,false)+crm(c.sv,cw.sv,obNum,true)+crm(c.lost,cw.lost,obNum,false)
+        /* CRM LEADS + QL% FROM ONE SOURCE (26 Nov 2026, Ayush: an ad showed more Qualified than leads - Video - Miraz EMI Offer,
+           last 7 days: Meta 8 leads, the CRM 65 leads / 14 qualified). Leads Generated is Meta's count, Qualified the CRM's, so
+           QL% of Meta's leads went past 100%. The CRM's own leads now sit beside it and QL% is of those, as on Google. */
+        +crm(c.leads,cw.leads,obNum,true)+crm(c.ql,cw.ql,obNum,true)+crm(pct(c.ql,c.leads),pct(cw.ql,cw.leads),pc0,true)+crm(c.cpql,cw.cpql,obMoney,false)+crm(c.sv,cw.sv,obNum,true)+crm(c.lost,cw.lost,obNum,false)
         +(vid?cell(pct(v.v_3s,v.imp),null,obPct,true):dash0(vwhy))
         +cell(pct(ln,t.clicks),pct(w.ln,w.clicks),obPct,true)
         +cell(t.ctr,w.ctr,obPct,true)
