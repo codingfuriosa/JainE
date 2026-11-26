@@ -193,13 +193,15 @@ const FEEDBACK_HUB_ADMIN='ayushruia1@gmail.com';
    2026-11-03: Manash Choudhury (digitalmarketing@), TEMPORARILY, on the Administrator's word - take him
    off again when asked. Keep this list and the one in feedback.is_system_rater() the same people. */
 const SYSTEM_FEEDBACK_EXTRA=['digitalmarketing@thejaingroup.com'];
-function fhMyDepts(){ const d=state.profile&&state.profile.department; return Array.isArray(d)?d:(d?[d]:[]); }
+// the profile's departments, else the JainE user record's (25 Nov 2026: jaingroupcaller11 has no profile row)
+function fhMyDepts(){ let d=state.profile&&state.profile.department; if(!d||(Array.isArray(d)&&!d.length)) d=state.roles&&state.roles.department; return Array.isArray(d)?d:(d?[d]:[]); }
 function fhMe(){ return String(state.email||'').trim().toLowerCase(); }
 function fhCanQrForms(){ return FEEDBACK_HUB_PEOPLE.indexOf(fhMe())!==-1; }
 function fhIsSystems(){ return fhMe()===FEEDBACK_HUB_ADMIN||fhMyDepts().indexOf('Systems')!==-1; }
 // Systems people (the Administrator included) post and read System Feedbacks; they never rate them -
 // not even system.admin@, who is also listed under Sales and Pre Sales.
-function fhIsRater(){ if(fhIsSystems()) return false; return SYSTEM_FEEDBACK_EXTRA.indexOf(fhMe())!==-1||fhMyDepts().some(function(d){ return d==='Sales'||d==='Pre Sales'; }); }
+// 25 Nov 2026: Post Sales rate too - only the feedbacks addressed to Post Sales (the database decides: feedback.item_for_me)
+function fhIsRater(){ if(fhIsSystems()) return false; return SYSTEM_FEEDBACK_EXTRA.indexOf(fhMe())!==-1||fhMyDepts().some(function(d){ return d==='Sales'||d==='Pre Sales'||d==='Post Sales'; }); }
 /* ACCOUNTS FILL THE FORMS IN; THEY DO NOT BUILD THEM (18 Nov 2026).
    The whole Accounts department, by department rather than by name - there are eight of them and
    the list would go stale the first time somebody joined. They get the forms and the answers given:

@@ -1204,7 +1204,7 @@ async function legalNav(reuse){
     return `<div class="sn-tree-node" style="margin-left:${depth*13}px">
       <div class="sn-item ${active?'active':''}" onclick="legalSelectCat(${node.id})">
         <span>${caret} ${esc(node.name)}</span>
-        <span class="sn-actions"><span class="ct">${totals[node.id]||0}</span><i class="fa-solid fa-plus sn-add" title="Add category inside ${esc(node.name)}" onclick="event.stopPropagation();docNewFolder('Legal',${node.id},'${esc(node.name).replace(/'/g,"\\'")}')"></i></span>
+        <span class="sn-actions"><span class="ct">${totals[node.id]||0}</span><i class="fa-solid fa-plus sn-add" title="Add category inside ${esc(node.name)}" onclick="event.stopPropagation();docNewFolder('Legal',${node.id},'${esc(node.name).replace(/'/g,"\\'")}')"></i>${!hasKids&&!(totals[node.id]||0)?`<i class="fa-solid fa-trash-can sn-add sn-del" title="Delete this empty folder" onclick="event.stopPropagation();legalDeleteFolder(${node.id},'${esc(node.name).replace(/'/g,"\\'")}')"></i>`:''}</span>
       </div>
       ${kids}
     </div>`;
@@ -1214,6 +1214,25 @@ async function legalNav(reuse){
     `<div class="sn-tree">${roots.map(r=>renderNode(r,0)).join('')}</div>`+
     `<div class="sn-item" style="color:var(--brand)" onclick="docNewFolder('Legal',null,null)"><span><i class="fa-solid fa-plus"></i> Add main folder</span></div>`;
 }
+/* DELETE AN EMPTY LEGAL FOLDER (26 Nov 2026, Ayush: "I can't delete a folder made in Legal which is actually independent" -
+   Legal could add folders but never remove one). Only a folder with nothing in it: the bin shows on a folder with no
+   documents and no folders inside, and before deleting the database is asked again - documents, sub-folders, and whether
+   a Legal MIS case keeps its files there. Anything found and the folder stays. */
+window.legalDeleteFolder=async function(id,name){
+  const [{count:docs,error:e1},{count:kids,error:e2},{count:cases,error:e3}]=await Promise.all([
+    sb.schema('doc').from('documents').select('id',{count:'exact',head:true}).eq('folder_id',id),
+    sb.schema('doc').from('folders').select('id',{count:'exact',head:true}).eq('parent_id',id),
+    sb.from('mis_case_folders').select('id',{count:'exact',head:true}).eq('doc_folder_id',id)]);
+  if(e1||e2){ toast('Could not check the folder: '+((e1||e2).message),'err'); return; }
+  const why=[docs?docs+' document'+(docs===1?'':'s'):'',kids?kids+' folder'+(kids===1?'':'s'):'',!e3&&cases?'a Legal MIS case keeps its files here':''].filter(Boolean);
+  if(why.length){ toast('"'+name+'" is not empty - it has '+why.join(', ')+'. Move or remove those first.','warn'); return; }
+  if(!await confirmDialog('Delete the empty folder "'+name+'" from Legal?',{title:'Delete folder',icon:'fa-trash-can',okLabel:'Delete folder',danger:true})) return;
+  const {data,error}=await sb.schema('doc').from('folders').delete().eq('id',id).select('id');
+  if(error||!data||!data.length){ toast('Could not delete the folder: '+((error&&error.message)||'you may not have permission to change Legal folders'),'err'); return; }
+  if(DOC.cat&&Number(DOC.cat)===id){ toast('Folder deleted','ok'); location.hash='#/legal'; return; }
+  toast('Folder deleted','ok'); legalNav(false);
+  try{ usageQueue('legal.folder_deleted','delete',{folder_id:String(id),name:String(name)}); }catch(_e){}
+};
 window.legalToggleExpand=function(id){if(DOC.legalExpanded.has(id))DOC.legalExpanded.delete(id);else DOC.legalExpanded.add(id);legalNav(true);};
 window.legalSelectCat=function(id){location.hash='#/legal/cat/'+id;};
 

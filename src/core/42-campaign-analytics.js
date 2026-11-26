@@ -589,12 +589,12 @@ function caPaint(){
       if(R.st==='err') return dash0('Meta did not give the reach: '+(R.why||'')); return R.v==null?dash0('No reach from Meta for these dates'):'<td>'+fmt(R.v)+'</td>'; };
     const fh=function(t,title){ return '<th'+(title?' title="'+esc(title)+'"':'')+'>'+t+'</th>'; };
     const fbHead=function(name){ return '<tr><th class="ca-nm">'+name+'</th>'+fh('Spend')+fh('Leads Generated','Leads of lead / chat campaigns - Ads Manager\x27s Results')+fh('CPL','Spend per lead generated')
-      +ct('Qualified','Qualified leads (CRM)')+ct('QL%','Qualified leads (CRM) as a share of the leads generated')+ct('CPQL','Spend per qualified lead (CRM)')+ct('Site Visited','Site visits (CRM)')+ct('Lost','Lost (CRM)')
+      +ct('CRM Leads','Leads the CRM ties to this row (after its filtering) - can differ from Meta\x27s count')+ct('Qualified','Qualified leads (CRM)')+ct('QL%','Qualified leads as a share of CRM leads - both from the CRM')+ct('CPQL','Spend per qualified lead (CRM)')+ct('Site Visited','Site visits (CRM)')+ct('Lost','Lost (CRM)')
       +fh('ThumbStop %','3-second video plays as a share of impressions')+fh('CTL %','Leads generated as a share of clicks')+fh('CTR %','Clicks as a share of impressions')
       +fh('Cost Per 1K Reach','Spend per 1,000 people reached')+fh('Impressions')+fh('Reach','People reached in these dates, from Meta')
       +fh('25% Play','Video plays watched to 25%')+fh('50% Play','Video plays watched to 50%')+fh('75% Play','Video plays watched to 75%')+fh('100% Play','Video plays watched to the end')
       +fh('25% Play %','People who watched to 25% as a share of the people reached')+fh('50% Play %','People who watched to 50% as a share of the people reached')+fh('75% Play %','People who watched to 75% as a share of the people reached')+fh('100% Play %','People who watched to the end as a share of the people reached')+xHead(fbXa)+'</tr>'; };
-    const fbXa=FB?caXcList('ads'):[], NFB=23+fbXa.length;
+    const fbXa=FB?caXcList('ads'):[], NFB=24+fbXa.length;
     const fbCols=function(t,w,x,v){ w=w||{}; v=v||{};
       const hasC=!!(CR&&x&&x.t), c=hasC?x.t:{}, cw=hasC?(x.w||{}):{}, why=!CR?'CRM figures are read at night - they show from the next morning':((x&&x.why)||'');
       const crm=function(val,was,fmt,up){ return hasC?cell(val,was,fmt,up).replace('<td>','<td class="ca-crm">'):dash0(why,'ca-crm'); };
@@ -604,7 +604,10 @@ function caPaint(){
       return cell(t.spend,w.spend,obMoney,null,true)
         +(cmpOn?cell(t.ln,w.ln,function(n){ return caLeads(n,t.pl); },true).replace('</td>',(t.tag||'')+'</td>'):'<td>'+t.lead+'</td>')
         +cell(t.cpl,w.cpl,obMoney,false)
-        +crm(c.ql,cw.ql,obNum,true)+crm(pct(c.ql,ln),pct(cw.ql,w.ln),pc0,true)+crm(c.cpql,cw.cpql,obMoney,false)+crm(c.sv,cw.sv,obNum,true)+crm(c.lost,cw.lost,obNum,false)
+        /* CRM LEADS + QL% FROM ONE SOURCE (26 Nov 2026, Ayush: an ad showed more Qualified than leads - Video - Miraz EMI Offer,
+           last 7 days: Meta 8 leads, the CRM 65 leads / 14 qualified). Leads Generated is Meta's count, Qualified the CRM's, so
+           QL% of Meta's leads went past 100%. The CRM's own leads now sit beside it and QL% is of those, as on Google. */
+        +crm(c.leads,cw.leads,obNum,true)+crm(c.ql,cw.ql,obNum,true)+crm(pct(c.ql,c.leads),pct(cw.ql,cw.leads),pc0,true)+crm(c.cpql,cw.cpql,obMoney,false)+crm(c.sv,cw.sv,obNum,true)+crm(c.lost,cw.lost,obNum,false)
         +(vid?cell(pct(v.v_3s,v.imp),null,obPct,true):dash0(vwhy))
         +cell(pct(ln,t.clicks),pct(w.ln,w.clicks),obPct,true)
         +cell(t.ctr,w.ctr,obPct,true)
