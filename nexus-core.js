@@ -11227,7 +11227,7 @@ function wmPaintBoardStats(){
    the moment a recording is saved) joins the parts, has Gemini transcribe them and stores the transcript, an
    English version, a summary and suggested tasks / to-dos / notes / decisions. The chip opens them
    (wmRecOpen, ops_rec_get). While one is waiting or being transcribed the list is read again every 30 s.
-   Step 3 (review the suggestions and add them to the meeting) is not built yet. */
+   Step 3 (27 Nov, later still): the window lets the starter or an editor Add / Edit / Skip each suggestion. */
 const WM_REC={on:null};          // the recording running on THIS device, if any
 const WM_RECS={};                // meeting id -> {at, rows} from ops_rec_list
 const WM_REC_PART_MS=120000;     // a part every two minutes
@@ -11262,7 +11262,7 @@ function wmRecsHtml(m){
     <small>${R.saved} part${R.saved===1?'':'s'} saved - sound is saved every 2 minutes${R.queue.length?` · ${R.queue.length} waiting to upload${R.err?' (no connection - it keeps trying)':''}`:''}</small></div></div>`;
   if(U) h+=`<div class="wm-recbar up"><i class="fa-solid fa-cloud-arrow-up"></i><div><b>Uploading ${esc(U.name)}</b> - keep this page open.<small>${U.pct}%</small><span class="bar"><i style="width:${U.pct}%"></i></span></div></div>`;
   if(rows.length){
-    const st=r=>r.status==='saved'?(r.attempts&&r.error_text?'waiting to be transcribed again (last try: '+r.error_text+')':'waiting to be transcribed'):r.status==='transcribing'?'transcribing - a few minutes':r.status==='ready'?'transcript ready'+(r.n_tasks?' · '+r.n_tasks+' task'+(r.n_tasks===1?'':'s')+' suggested':''):r.status==='failed'?(r.parts?'not transcribed':'not saved')+(r.error_text?' - '+r.error_text:'')
+    const st=r=>r.status==='saved'?(r.attempts&&r.error_text?'waiting to be transcribed again (last try: '+r.error_text+')':'waiting to be transcribed'):r.status==='transcribing'?'transcribing - a few minutes':r.status==='ready'?'transcript ready'+(r.n_left?' · '+r.n_left+' to review':r.n_tasks?' · reviewed':''):r.status==='failed'?(r.parts?'not transcribed':'not saved')+(r.error_text?' - '+r.error_text:'')
       :(Date.now()-new Date(r.started_at).getTime()>6*3600e3?'stopped before it finished - the parts that arrived are kept':r.source==='uploaded'?'uploading on another device':'recording on another device');
     h+=`<div class="wm-reclist">`+rows.map(r=>{ const what=r.source==='uploaded'?esc(r.file_name||'Uploaded file'):'Recorded '+esc(wmClock(r.started_at))+(r.ended_at?' – '+esc(wmClock(r.ended_at)):'');
       const d=wmRecMins(r.duration_seconds);
@@ -11369,35 +11369,132 @@ window.wmRecStop=async function(){
   if(R.saved) wmRecPoke();
 };
 
-/* The transcript window: summary and what was suggested first, then the transcript as spoken and in English.
-   Read only for now - adding the suggestions to the meeting is step 3. */
+/* The transcript window (step 3, 27 Nov): summary, then every suggestion with Add / Edit / Skip for the
+   starter or an editor, then the transcript as spoken and in English. Add goes through the meeting's own
+   paths - a person found: a real Accountability task (wmCreateTask + ops_item_add), in its list; nobody
+   found: an unassigned line on To-dos; a to-do: ops_note_add trying / future; an obstacle / opportunity:
+   ops_note_add - so it is what typing it on the action line would have made. Each choice is kept on the
+   recording (ops_rec_mark, suggestions.review: t0.. tasks, d0.. to-dos, n0.. notes), the same for everyone.
+   Others see the same list with what was added or skipped, without the buttons. */
+const WM_RT_L={target:'Target',trying:'Trying',future:'Future'};
+// A name Gemini heard -> a JainE person: the full name exactly, else a first name only one person has.
+function wmRecWho(name){
+  const n=String(name||'').trim().toLowerCase(); if(!n) return null;
+  const all=(WM.people||[]).filter(p=>typeof wmAssignable!=='function'||wmAssignable(p));
+  const ex=all.filter(p=>p.name.toLowerCase()===n); if(ex.length===1) return ex[0];
+  const f=n.split(/\s+/)[0], fm=all.filter(p=>p.name.toLowerCase().split(/\s+/)[0]===f);
+  return fm.length===1?fm[0]:null;
+}
+function wmRecCanAct(){ const v=WM.recView; return !!(v&&v.r&&v.r.status==='ready'&&wmCanEdit(v.r.meeting_id)&&!WM.ro); }
+function wmRecItem(k){ const g=(WM.recView.r.suggestions||{}), i=Number(k.slice(1)); return (k[0]==='t'?g.tasks:k[0]==='d'?g.todos:g.notes||[])[i]; }
+function wmRecRowHtml(k){
+  const v=WM.recView, x=wmRecItem(k), rv=((v.r.suggestions||{}).review||{})[k], ed=v.edit===k, can=wmRecCanAct(), busy=v.busy===k;
+  if(!x) return '';
+  const tag=k[0]==='n'?`<span class="wm-tdb-tag">${x.kind==='opportunity'?'Opportunity':'Obstacle'}</span>`:`<span class="wm-tdb-tag ${x.list}">${WM_RT_L[x.list]||'Target'}</span>`;
+  if(ed){
+    if(k[0]==='t'){
+      const p=wmRecWho(x.person)||wmRecWho(x.person_said), m=wmMeeting(v.r.meeting_id), here=new Set((m&&m.attendees)||[]);
+      const ppl=(WM.people||[]).filter(q=>typeof wmAssignable!=='function'||wmAssignable(q));
+      const opt=q=>`<option value="${esc(q.email)}" ${p&&p.email===q.email?'selected':''}>${esc(q.name)}${q.dept?' · '+esc(q.dept):''}</option>`;
+      const inRoom=ppl.filter(q=>here.has(q.name)), rest=ppl.filter(q=>!here.has(q.name));
+      return `<div class="wm-rt-it ed" data-k="${k}"><div class="wm-rt-f">
+        <input id="wmRtTitle" value="${esc(x.title)}" placeholder="What is to be done">
+        <div class="r"><select id="wmRtWho"><option value="">No one yet - an unassigned line</option>${inRoom.length?`<optgroup label="In this meeting">${inRoom.map(opt).join('')}</optgroup><optgroup label="Everyone else">${rest.map(opt).join('')}</optgroup>`:rest.map(opt).join('')}</select>
+        <input type="date" id="wmRtDue" value="${esc(x.due||'')}">
+        <select id="wmRtList">${['target','trying','future'].map(s=>`<option value="${s}" ${x.list===s?'selected':''}>${WM_RT_L[s]}</option>`).join('')}</select></div>
+        <div class="b"><button class="wm-btn wm-sm" onclick="wmRecAdd('${k}',true)">Add</button><button class="wm-quiet" onclick="wmRecEdit(null)">Cancel</button></div></div></div>`;
+    }
+    const sel=k[0]==='d'?`<select id="wmRtList">${['trying','future'].map(s=>`<option value="${s}" ${x.list===s?'selected':''}>${WM_RT_L[s]}</option>`).join('')}</select>`
+      :`<select id="wmRtList">${['obstacle','opportunity'].map(s=>`<option value="${s}" ${x.kind===s?'selected':''}>${s==='obstacle'?'Obstacle':'Opportunity'}</option>`).join('')}</select>`;
+    return `<div class="wm-rt-it ed" data-k="${k}"><div class="wm-rt-f"><input id="wmRtTitle" value="${esc(x.text)}"><div class="r">${sel}</div>
+      <div class="b"><button class="wm-btn wm-sm" onclick="wmRecAdd('${k}',true)">Add</button><button class="wm-quiet" onclick="wmRecEdit(null)">Cancel</button></div></div></div>`;
+  }
+  let main, sub='';
+  if(k[0]==='t'){
+    const p=wmRecWho(x.person)||wmRecWho(x.person_said), due=x.due?'by '+esc(wmFmtS(x.due)):x.due_said?esc(x.due_said):'';
+    // once added or skipped the hints about what Add would do are no longer true (it may have been edited)
+    const who=rv?(p?esc(p.name):x.person_said?esc(x.person_said):''):p?esc(p.name):x.person_said?esc(x.person_said)+' <em>not matched - Edit to pick</em>':'<em>no one named - goes in as an unassigned line</em>';
+    main=`<b>${esc(x.title)}</b>`; sub=[who,due,x.quote?'“'+esc(x.quote)+'”':''].filter(Boolean).join(' · ');
+  } else main=esc(x.text);
+  const st=rv?`<span class="wm-rt-st ${rv.s}">${rv.s==='added'?'<i class="fa-solid fa-check"></i> Added':'Skipped'}${can&&rv.s==='skipped'?` <button class="wm-quiet" onclick="wmRecMark('${k}','')">Undo</button>`:''}</span>`
+    :can?`<span class="wm-rt-acts">${busy?'<i class="fa-solid fa-spinner fa-spin"></i>':`<button class="wm-btn wm-sm" onclick="wmRecAdd('${k}')">Add</button><button class="wm-quiet" onclick="wmRecEdit('${k}')">Edit</button><button class="wm-quiet" onclick="wmRecMark('${k}','skipped')">Skip</button>`}</span>`:'';
+  return `<div class="wm-rt-it ${rv?'rv '+rv.s:''}" data-k="${k}">${tag}<div class="tx">${main}${sub?`<small>${sub}</small>`:''}</div>${st}</div>`;
+}
+function wmRecSugHtml(){
+  const g=WM.recView.r.suggestions||{}, rv=g.review||{};
+  const keys=(p,a)=>(a||[]).map((_,i)=>p+i);
+  const sec=(h,ks)=>ks.length?`<div class="wm-rt-sec"><h4>${h} <span>${ks.length}</span></h4>${ks.map(wmRecRowHtml).join('')}</div>`:'';
+  const all=[...keys('t',g.tasks),...keys('d',g.todos),...keys('n',g.notes)], left=all.filter(k=>!rv[k]).length;
+  const head=all.length&&wmRecCanAct()?`<div class="wm-rt-left">${left?`<b>${left}</b> of ${all.length} still to add or skip`:'<i class="fa-solid fa-circle-check"></i> All reviewed'}</div>`:'';
+  const body=sec('Suggested tasks',keys('t',g.tasks))+sec('To try or for later',keys('d',g.todos))+sec('Obstacles and opportunities',keys('n',g.notes))
+    +((g.decisions||[]).length?`<div class="wm-rt-sec"><h4>Decisions <span>${g.decisions.length}</span></h4>${g.decisions.map(t=>`<div class="wm-rt-it"><i class="fa-solid fa-check"></i><div class="tx">${esc(t)}</div></div>`).join('')}</div>`:'');
+  return head+(body||'<div class="wm-mute" style="margin:8px 0">Nothing to suggest - no tasks, to-dos or decisions were heard.</div>');
+}
+function wmRecPaintSug(){ const h=$('wmRtSug'); if(h) h.innerHTML=wmRecSugHtml(); }
 window.wmRecOpen=async function(id){
   let r;
   try{ const {data,error}=await sb.rpc('ops_rec_get',{p_id:id}); if(error) throw error; r=Array.isArray(data)?data[0]:data; if(!r) throw new Error('not found'); }
   catch(e){ toast('Could not open the transcript: '+(e.message||e),'err'); return; }
-  const g=r.suggestions||{}, tasks=g.tasks||[], todos=g.todos||[], notes=g.notes||[], dec=g.decisions||[];
-  const L={target:'Target',trying:'Trying',future:'Future'};
-  const who=t=>t.person?esc(t.person):t.person_said?esc(t.person_said)+' <em>not matched</em>':'<em>no one named</em>';
-  const due=t=>t.due?'by '+esc(wmFmtS(t.due)):t.due_said?esc(t.due_said):'';
-  const sec=(h,n,body)=>n?`<div class="wm-rt-sec"><h4>${h} <span>${n}</span></h4>${body}</div>`:'';
-  const sug=sec('Suggested tasks',tasks.length,tasks.map(t=>`<div class="wm-rt-it"><span class="wm-tdb-tag ${t.list}">${L[t.list]||'Target'}</span><div><b>${esc(t.title)}</b><small>${who(t)}${due(t)?' · '+due(t):''}${t.quote?' · “'+esc(t.quote)+'”':''}</small></div></div>`).join(''))
-    +sec('To try or for later',todos.length,todos.map(t=>`<div class="wm-rt-it"><span class="wm-tdb-tag ${t.list}">${L[t.list]}</span><div>${esc(t.text)}</div></div>`).join(''))
-    +sec('Obstacles and opportunities',notes.length,notes.map(t=>`<div class="wm-rt-it"><span class="wm-tdb-tag">${t.kind==='opportunity'?'Opportunity':'Obstacle'}</span><div>${esc(t.text)}</div></div>`).join(''))
-    +sec('Decisions',dec.length,dec.map(t=>`<div class="wm-rt-it"><i class="fa-solid fa-check"></i><div>${esc(t)}</div></div>`).join(''));
+  const g=r.suggestions||{}, same=!r.transcript_en||r.transcript_en===r.transcript;
+  WM.recView={r,t:r.transcript||'',en:r.transcript_en||'',edit:null,busy:null};
   const tx=t=>t?`<div class="wm-rt-tx">${esc(t).replace(/\n/g,'<br>')}</div>`:'<div class="wm-mute">No speech was heard.</div>';
-  const same=!r.transcript_en||r.transcript_en===r.transcript;
-  WM.recView={t:r.transcript||'',en:r.transcript_en||''};
-  openModal(`<div class="modal-head"><h3>Meeting recording${r.duration_seconds?' · '+wmRecMins(r.duration_seconds):''}${g.languages?' · '+esc(g.languages):''}</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  openModal(`<div class="modal-head"><h3>Meeting recording${r.duration_seconds?' · '+wmRecMins(r.duration_seconds):''}${g.languages?' · '+esc(g.languages):''}</h3><span class="x" onclick="wmRecClose()">&times;</span></div>
     <div class="modal-body wm-rt">
-      <div class="wm-rt-note"><i class="fa-solid fa-circle-info"></i> Written by AI from the sound - check names and dates. Adding these to the meeting comes next; for now they are here to read.</div>
+      <div class="wm-rt-note"><i class="fa-solid fa-circle-info"></i> Written by AI from the sound - check names and dates.${wmRecCanAct()?' Add puts it in this meeting just as typing it on the action line would; Edit lets you change it first.':''}</div>
       ${r.summary?`<div class="wm-rt-sec"><h4>Summary</h4><div class="wm-rt-sum">${esc(r.summary).replace(/\n/g,'<br>')}</div></div>`:''}
-      ${sug||'<div class="wm-mute" style="margin:8px 0">Nothing to suggest - no tasks, to-dos or decisions were heard.</div>'}
+      <div id="wmRtSug">${wmRecSugHtml()}</div>
       <div class="wm-rt-sec"><h4>Transcript${same?'':` <span class="wm-rt-tg"><button type="button" class="on" onclick="wmRecTx(this,'t')">As spoken</button><button type="button" onclick="wmRecTx(this,'en')">English</button></span>`}</h4><div id="wmRtTx">${tx(r.transcript)}</div></div>
     </div>`);
   const md=document.querySelector('.modal'); if(md) md.classList.add('wm-rt-modal');
 };
+window.wmRecClose=function(){ const v=WM.recView; closeModal(); if(v&&v.r){ WM_RECS[v.r.meeting_id]=null; if(WM.cur===v.r.meeting_id) wmLoadRecs(v.r.meeting_id,true); } };
 window.wmRecTx=function(b,k){ const v=WM.recView||{}, t=k==='en'?v.en:v.t; [...b.parentNode.children].forEach(x=>x.classList.toggle('on',x===b));
   const h=$('wmRtTx'); if(h) h.innerHTML=t?'<div class="wm-rt-tx">'+esc(t).replace(/\n/g,'<br>')+'</div>':'<div class="wm-mute">No speech was heard.</div>'; };
+window.wmRecEdit=function(k){ WM.recView.edit=k; wmRecPaintSug(); const i=$('wmRtTitle'); if(i){ i.focus(); i.select(); } };
+async function wmRecSave(k,state,ref){
+  const v=WM.recView; const {data,error}=await sb.rpc('ops_rec_mark',{p_id:v.r.id,p_key:k,p_state:state,p_ref:ref||null}); if(error) throw error;
+  v.r.suggestions=Object.assign({},v.r.suggestions||{},{review:data||{}});
+}
+window.wmRecMark=async function(k,state){
+  const v=WM.recView; if(!wmRecCanAct()||v.busy) return; v.busy=k; wmRecPaintSug();
+  try{ await wmRecSave(k,state); }catch(e){ wmErr('Could not save that',e); }
+  finally{ v.busy=null; wmRecPaintSug(); }
+};
+window.wmRecAdd=async function(k,fromEdit){
+  const v=WM.recView, x=wmRecItem(k), m=wmMeeting(v.r.meeting_id); if(!x||!m||!wmRecCanAct()||v.busy) return;
+  let title, email=null, due='', list, kind;
+  if(fromEdit){
+    title=(($('wmRtTitle')||{}).value||'').replace(/\s+/g,' ').trim();
+    if(k[0]==='t'){ email=($('wmRtWho')||{}).value||null; due=($('wmRtDue')||{}).value||''; list=($('wmRtList')||{}).value||'target'; }
+    else if(k[0]==='d') list=($('wmRtList')||{}).value||'trying'; else kind=($('wmRtList')||{}).value||'obstacle';
+  } else if(k[0]==='t'){ const p=wmRecWho(x.person)||wmRecWho(x.person_said); title=x.title; email=p?p.email:null; due=x.due||''; list=x.list||'target'; }
+  else { title=x.text; list=x.list; kind=x.kind; }
+  if(!title){ toast('Type what it is first','err'); return; }
+  v.busy=k; v.edit=null; wmRecPaintSug();
+  try{
+    let ref=null, msg;
+    if(k[0]==='t'){
+      if(email){
+        const tid=await wmCreateTask(title,[email],due||null,'none');
+        const {data,error}=await sb.rpc('ops_item_add',{p_meeting:m.id,p_item:title,p_ptask:tid,p_owner:wmName(email),p_due:due||null}); if(error) throw error;
+        ref=data; msg='Task created for '+wmName(email);
+      } else {
+        const {data,error}=await sb.rpc('ops_item_add',{p_meeting:m.id,p_item:title,p_ptask:null,p_owner:null,p_due:due||null}); if(error) throw error;
+        ref=data; msg='Added as an unassigned line - give it a person on To-dos';
+      }
+      if(ref&&list&&list!=='target'){ const {error}=await sb.rpc('ops_item_set_section',{p_id:ref,p_section:list}); if(error) throw error; }
+    } else {
+      const sec=k[0]==='d'?list:kind;
+      const {data,error}=await sb.rpc('ops_note_add',{p_meeting:m.id,p_section:sec,p_body:title}); if(error) throw error;
+      ref=data; msg=k[0]==='d'?'Added to Typed to-dos ('+WM_RT_L[sec]+')':'Added to '+(sec==='opportunity'?'Opportunities':'Obstacles');
+    }
+    await wmRecSave(k,'added',ref);
+    toast(msg,'ok');
+    try{ await wmReload(); await wmReloadNotes(); }catch(_e){}
+    if(WM.cur===m.id){ try{ wmCounts(); wmPaintDrafts(); wmPaintTabs(); wmPaintNav(); if($('wmTdCard')) wmRepaintTd(); if($('wmOoCard')) wmRepaintOo(); }catch(_e){} }
+  }catch(e){ wmErr('Could not add that',e); }
+  finally{ v.busy=null; wmRecPaintSug(); }
+};
 
 /* More → Upload a recording: a file recorded on a phone (or anywhere) for this meeting, any date. */
 window.wmRecUpload=function(){
@@ -13529,6 +13626,16 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-rt-tg{margin-left:auto;display:inline-flex;border:1px solid #E3E5EC;border-radius:20px;padding:2px;text-transform:none;letter-spacing:0}'
   +'.wm-rt-tg button{border:0;background:none;font:inherit;font-size:11.5px;font-weight:700;color:#6B7083;padding:2px 10px;border-radius:20px;cursor:pointer}.wm-rt-tg button.on{background:#5B4BE8;color:#fff}'
   +'.wm-rt-tx{white-space:normal;line-height:1.6;background:#FAFAFD;border:1px solid #ECEEF3;border-radius:8px;padding:10px 12px}'
+  +'.wm-rt-it .tx{flex:1;min-width:0}'
+  +'.wm-rt-acts{flex:none;display:inline-flex;align-items:center;gap:10px;margin-left:8px}.wm-rt-acts .wm-quiet{font-size:12.5px}'
+  +'.wm-rt-st{flex:none;margin-left:8px;font-size:12px;font-weight:700;color:#7A8095;display:inline-flex;align-items:center;gap:6px}'
+  +'.wm-rt-st.added{color:#1E8A55}.wm-rt-it.rv.skipped .tx{color:#9AA0B4;text-decoration:line-through}.wm-rt-it.rv.added .tx b{color:#4A4F63}'
+  +'.wm-rt-left{margin:14px 0 2px;padding:7px 10px;border-radius:8px;background:#F4F2FF;font-size:12.5px;color:#4A3FC0}.wm-rt-left i{color:#1E8A55}'
+  +'.wm-rt-it.ed{display:block;background:#FAFAFD;border:1px solid #ECEEF3;border-radius:8px;padding:8px 10px;margin:4px 0}'
+  +'.wm-rt-f input,.wm-rt-f select{font:inherit;font-size:13px;border:1px solid #DADDE6;border-radius:7px;padding:6px 8px;background:#fff;min-width:0}'
+  +'.wm-rt-f>input{width:100%;box-sizing:border-box}.wm-rt-f .r{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.wm-rt-f .r select:first-child{flex:1 1 200px}'
+  +'.wm-rt-f .b{display:flex;gap:12px;align-items:center;margin-top:8px}'
+  +'@media(max-width:600px){.wm-rt-it{flex-wrap:wrap}.wm-rt-acts,.wm-rt-st{margin-left:0;width:100%;padding-left:2px}}'
 +'</style>';
 /* ===== Global first-login onboarding (full screen, no sidebar) ===== */
 async function renderOnboarding(){
