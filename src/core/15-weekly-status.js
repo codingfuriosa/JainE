@@ -546,8 +546,12 @@ function wmPaintBoardStats(){
    <prefix>part-00001.<ext>, part-00002...; the first holds the file header, so joined in order they are
    the whole recording. A file recorded elsewhere (a phone's voice recorder) can be uploaded instead, as
    one part. Rows live in ops.meeting_recordings (ops_rec_start / _part / _finish / _list). Only the
-   starter or an editor may record or upload. Step 2 (transcribe on the server) and step 3 (review the
-   suggested tasks and notes) are not built yet: a recording ends as "Saved". */
+   starter or an editor may record or upload.
+   Step 2 (27 Nov, later): the edge function meeting-transcribe (pg_cron every 2 minutes, and poked from here
+   the moment a recording is saved) joins the parts, has Gemini transcribe them and stores the transcript, an
+   English version, a summary and suggested tasks / to-dos / notes / decisions. The chip opens them
+   (wmRecOpen, ops_rec_get). While one is waiting or being transcribed the list is read again every 30 s.
+   Step 3 (review the suggestions and add them to the meeting) is not built yet. */
 const WM_REC={on:null};          // the recording running on THIS device, if any
 const WM_RECS={};                // meeting id -> {at, rows} from ops_rec_list
 const WM_REC_PART_MS=120000;     // a part every two minutes
@@ -582,11 +586,13 @@ function wmRecsHtml(m){
     <small>${R.saved} part${R.saved===1?'':'s'} saved - sound is saved every 2 minutes${R.queue.length?` · ${R.queue.length} waiting to upload${R.err?' (no connection - it keeps trying)':''}`:''}</small></div></div>`;
   if(U) h+=`<div class="wm-recbar up"><i class="fa-solid fa-cloud-arrow-up"></i><div><b>Uploading ${esc(U.name)}</b> - keep this page open.<small>${U.pct}%</small><span class="bar"><i style="width:${U.pct}%"></i></span></div></div>`;
   if(rows.length){
-    const st=r=>r.status==='saved'?'saved - the transcript comes later':r.status==='transcribing'?'transcribing…':r.status==='ready'?'transcript ready':r.status==='failed'?'not saved'+(r.error_text?' - '+r.error_text:'')
+    const st=r=>r.status==='saved'?(r.attempts&&r.error_text?'waiting to be transcribed again (last try: '+r.error_text+')':'waiting to be transcribed'):r.status==='transcribing'?'transcribing - a few minutes':r.status==='ready'?'transcript ready'+(r.n_tasks?' · '+r.n_tasks+' task'+(r.n_tasks===1?'':'s')+' suggested':''):r.status==='failed'?(r.parts?'not transcribed':'not saved')+(r.error_text?' - '+r.error_text:'')
       :(Date.now()-new Date(r.started_at).getTime()>6*3600e3?'stopped before it finished - the parts that arrived are kept':r.source==='uploaded'?'uploading on another device':'recording on another device');
     h+=`<div class="wm-reclist">`+rows.map(r=>{ const what=r.source==='uploaded'?esc(r.file_name||'Uploaded file'):'Recorded '+esc(wmClock(r.started_at))+(r.ended_at?' – '+esc(wmClock(r.ended_at)):'');
       const d=wmRecMins(r.duration_seconds);
-      return `<span class="wm-recrow ${r.status}" title="${esc((r.source==='uploaded'?'Uploaded':'Recorded')+' by '+wmName(r.created_by))}"><i class="fa-solid ${r.source==='uploaded'?'fa-file-audio':'fa-microphone'}"></i>${what}${d?' · '+d:''} · ${esc(st(r))}</span>`; }).join('')+`</div>`;
+      const by=(r.source==='uploaded'?'Uploaded':'Recorded')+' by '+wmName(r.created_by);
+      return r.status==='ready'?`<button type="button" class="wm-recrow ready" onclick="wmRecOpen(${r.id})" title="${esc(by)} - open the transcript"><i class="fa-solid fa-file-lines"></i>${what}${d?' · '+d:''} · ${esc(st(r))}<b>Open</b></button>`
+        :`<span class="wm-recrow ${r.status}" title="${esc(by)}">${r.status==='transcribing'?'<i class="fa-solid fa-spinner fa-spin"></i>':`<i class="fa-solid ${r.source==='uploaded'?'fa-file-audio':'fa-microphone'}"></i>`}${what}${d?' · '+d:''} · ${esc(st(r))}</span>`; }).join('')+`</div>`;
   }
   return h;
 }
@@ -600,6 +606,14 @@ async function wmLoadRecs(id,force){
   WM_RECS[id]={at:Date.now(),rows:c?c.rows:[]};
   try{ const {data,error}=await sb.rpc('ops_rec_list',{p_meeting:id}); if(error) throw error; WM_RECS[id]={at:Date.now(),rows:data||[]}; }catch(e){ return; }
   if(WM.cur===id) wmPaintRecUi();
+  clearTimeout(WM.recPoll);
+  if((WM_RECS[id].rows||[]).some(r=>r.status==='saved'||r.status==='transcribing'))
+    WM.recPoll=setTimeout(()=>{ if(WM.cur===id&&$('wmRecs')) wmLoadRecs(id,true); },30000);
+}
+// Start the transcriber now rather than at its next two-minute round (it only works its queue).
+async function wmRecPoke(){
+  try{ const {data:{session}}=await sb.auth.getSession(); const t=session&&session.access_token; if(!t) return;
+    fetch(SUPABASE_URL+'/functions/v1/meeting-transcribe',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+t,apikey:SUPABASE_KEY},body:'{"work":true}'}).catch(()=>{}); }catch(e){}
 }
 // Off the meeting page (or on another meeting) a dark pill keeps the recording in sight and leads back.
 function wmRecPill(R){
@@ -676,7 +690,38 @@ window.wmRecStop=async function(){
   WM_REC.on=null; window.removeEventListener('beforeunload',wmRecUnload); wmRecPill(null);
   toast('Recording saved'+(R.secs>=60?' - '+wmRecMins(R.secs):''),'ok');
   WM_RECS[R.meeting]=null; if(WM.cur===R.meeting){ wmPaintRecUi(); wmLoadRecs(R.meeting,true); }
+  if(R.saved) wmRecPoke();
 };
+
+/* The transcript window: summary and what was suggested first, then the transcript as spoken and in English.
+   Read only for now - adding the suggestions to the meeting is step 3. */
+window.wmRecOpen=async function(id){
+  let r;
+  try{ const {data,error}=await sb.rpc('ops_rec_get',{p_id:id}); if(error) throw error; r=Array.isArray(data)?data[0]:data; if(!r) throw new Error('not found'); }
+  catch(e){ toast('Could not open the transcript: '+(e.message||e),'err'); return; }
+  const g=r.suggestions||{}, tasks=g.tasks||[], todos=g.todos||[], notes=g.notes||[], dec=g.decisions||[];
+  const L={target:'Target',trying:'Trying',future:'Future'};
+  const who=t=>t.person?esc(t.person):t.person_said?esc(t.person_said)+' <em>not matched</em>':'<em>no one named</em>';
+  const due=t=>t.due?'by '+esc(wmFmtS(t.due)):t.due_said?esc(t.due_said):'';
+  const sec=(h,n,body)=>n?`<div class="wm-rt-sec"><h4>${h} <span>${n}</span></h4>${body}</div>`:'';
+  const sug=sec('Suggested tasks',tasks.length,tasks.map(t=>`<div class="wm-rt-it"><span class="wm-tdb-tag ${t.list}">${L[t.list]||'Target'}</span><div><b>${esc(t.title)}</b><small>${who(t)}${due(t)?' · '+due(t):''}${t.quote?' · “'+esc(t.quote)+'”':''}</small></div></div>`).join(''))
+    +sec('To try or for later',todos.length,todos.map(t=>`<div class="wm-rt-it"><span class="wm-tdb-tag ${t.list}">${L[t.list]}</span><div>${esc(t.text)}</div></div>`).join(''))
+    +sec('Obstacles and opportunities',notes.length,notes.map(t=>`<div class="wm-rt-it"><span class="wm-tdb-tag">${t.kind==='opportunity'?'Opportunity':'Obstacle'}</span><div>${esc(t.text)}</div></div>`).join(''))
+    +sec('Decisions',dec.length,dec.map(t=>`<div class="wm-rt-it"><i class="fa-solid fa-check"></i><div>${esc(t)}</div></div>`).join(''));
+  const tx=t=>t?`<div class="wm-rt-tx">${esc(t).replace(/\n/g,'<br>')}</div>`:'<div class="wm-mute">No speech was heard.</div>';
+  const same=!r.transcript_en||r.transcript_en===r.transcript;
+  WM.recView={t:r.transcript||'',en:r.transcript_en||''};
+  openModal(`<div class="modal-head"><h3>Meeting recording${r.duration_seconds?' · '+wmRecMins(r.duration_seconds):''}${g.languages?' · '+esc(g.languages):''}</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body wm-rt">
+      <div class="wm-rt-note"><i class="fa-solid fa-circle-info"></i> Written by AI from the sound - check names and dates. Adding these to the meeting comes next; for now they are here to read.</div>
+      ${r.summary?`<div class="wm-rt-sec"><h4>Summary</h4><div class="wm-rt-sum">${esc(r.summary).replace(/\n/g,'<br>')}</div></div>`:''}
+      ${sug||'<div class="wm-mute" style="margin:8px 0">Nothing to suggest - no tasks, to-dos or decisions were heard.</div>'}
+      <div class="wm-rt-sec"><h4>Transcript${same?'':` <span class="wm-rt-tg"><button type="button" class="on" onclick="wmRecTx(this,'t')">As spoken</button><button type="button" onclick="wmRecTx(this,'en')">English</button></span>`}</h4><div id="wmRtTx">${tx(r.transcript)}</div></div>
+    </div>`);
+  const md=document.querySelector('.modal'); if(md) md.classList.add('wm-rt-modal');
+};
+window.wmRecTx=function(b,k){ const v=WM.recView||{}, t=k==='en'?v.en:v.t; [...b.parentNode.children].forEach(x=>x.classList.toggle('on',x===b));
+  const h=$('wmRtTx'); if(h) h.innerHTML=t?'<div class="wm-rt-tx">'+esc(t).replace(/\n/g,'<br>')+'</div>':'<div class="wm-mute">No speech was heard.</div>'; };
 
 /* More → Upload a recording: a file recorded on a phone (or anywhere) for this meeting, any date. */
 window.wmRecUpload=function(){
@@ -695,7 +740,7 @@ function wmMediaSecs(f){
 }
 async function wmRecUploadFile(m,f){
   if(!/^(audio|video)\//.test(f.type||'')&&!/\.(m4a|mp3|wav|aac|ogg|opus|webm|amr|3gp|mp4)$/i.test(f.name)){ toast('Pick a sound (or video) file of the meeting.','err'); return; }
-  if(f.size>1024*1024*1024){ toast('That file is over 1 GB - send a shorter or smaller copy.','err'); return; }
+  if(f.size>150*1024*1024){ toast('That file is over 150 MB - the transcriber cannot take it. Send a sound-only copy (a voice recorder file of a 2-hour meeting is about 100 MB).','err'); return; }
   const secs=await wmMediaSecs(f);
   let row;
   try{ const {data,error}=await sb.rpc('ops_rec_start',{p_meeting:m.id,p_source:'uploaded',p_mime:f.type||null,p_file_name:f.name}); if(error) throw error;
@@ -708,7 +753,7 @@ async function wmRecUploadFile(m,f){
     await wmS3Put(wmRecKey({prefix:row.s3_prefix,ext:wmRecExt(f.type,f.name)},1),f,p=>{ if(p!==U.pct){ U.pct=p; const b=document.querySelector('.wm-recbar.up'); if(b){ b.querySelector('small').textContent=p+'%'; b.querySelector('.bar i').style.width=p+'%'; } } });
     let r=await sb.rpc('ops_rec_part',{p_id:row.id,p_part:1,p_bytes:f.size}); if(r.error) throw r.error;
     r=await sb.rpc('ops_rec_finish',{p_id:row.id,p_seconds:secs}); if(r.error) throw r.error;
-    toast('Recording uploaded'+(secs>=60?' - '+wmRecMins(secs):''),'ok');
+    toast('Recording uploaded - it is transcribed in a few minutes','ok'); wmRecPoke();
   }catch(e){ toast('The upload stopped: '+(e.message||e)+'. Try again.','err'); try{ await sb.rpc('ops_rec_finish',{p_id:row.id,p_seconds:secs}); }catch(_e){} }
   finally{ WM.recUp=null; window.removeEventListener('beforeunload',warn); WM_RECS[m.id]=null; paint(); wmLoadRecs(m.id,true); }
 }
@@ -2794,4 +2839,18 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-recrow i{color:#9AA0B4}.wm-recrow.failed{color:#B3263E;background:#FDECEE;border-color:#F6D3D9}.wm-recrow.ready i{color:#1E8A55}'
   +'.wm-recpill{position:fixed;right:16px;bottom:16px;z-index:60;display:inline-flex;align-items:center;gap:8px;background:#1C1F2E;color:#fff;border:0;border-radius:22px;padding:9px 14px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.2)}'
   +'@media(max-width:600px){.wm-recs{margin:0 14px 12px}.wm-recb,.wm-recon{margin-right:6px}}'
+  +'button.wm-recrow{font:inherit;font-size:12px;cursor:pointer;background:#EAF7F0;border-color:#CBEBD9;color:#1C5E3C}button.wm-recrow:hover{background:#DDF2E6}'
+  +'button.wm-recrow b{margin-left:4px;color:#1E8A55}'
+  +'.wm-recrow.transcribing{background:#F4F2FF;border-color:#DDD8FF;color:#4A3FC0}.wm-recrow.transcribing i{color:#5B4BE8}'
+  +'.wm-rt-modal{max-width:760px;width:calc(100% - 32px)}'
+  +'.wm-rt{max-height:72vh;overflow:auto;font-size:13px;color:#2B2F40}'
+  +'.wm-rt-note{display:flex;gap:8px;align-items:flex-start;background:#F6F7FA;border-radius:8px;padding:8px 10px;color:#5D6378;font-size:12px;margin-bottom:10px}'
+  +'.wm-rt-sec{margin:12px 0 4px}.wm-rt-sec h4{display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#5D6378}'
+  +'.wm-rt-sec h4>span:not(.wm-rt-tg){background:#F0F1F5;border-radius:10px;padding:0 7px;font-size:11px}'
+  +'.wm-rt-sum{line-height:1.55}'
+  +'.wm-rt-it{display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-top:1px solid #F1F2F6}.wm-rt-it:first-of-type{border-top:0}'
+  +'.wm-rt-it>i{color:#1E8A55;margin-top:3px}.wm-rt-it .wm-tdb-tag{margin-top:2px}.wm-rt-it small{display:block;color:#7A8095;margin-top:2px}.wm-rt-it em{color:#C46E12;font-style:normal}'
+  +'.wm-rt-tg{margin-left:auto;display:inline-flex;border:1px solid #E3E5EC;border-radius:20px;padding:2px;text-transform:none;letter-spacing:0}'
+  +'.wm-rt-tg button{border:0;background:none;font:inherit;font-size:11.5px;font-weight:700;color:#6B7083;padding:2px 10px;border-radius:20px;cursor:pointer}.wm-rt-tg button.on{background:#5B4BE8;color:#fff}'
+  +'.wm-rt-tx{white-space:normal;line-height:1.6;background:#FAFAFD;border:1px solid #ECEEF3;border-radius:8px;padding:10px 12px}'
 +'</style>';
