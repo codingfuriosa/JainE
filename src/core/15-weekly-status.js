@@ -540,6 +540,179 @@ function wmPaintBoardStats(){
   host.innerHTML=c(pend.length,'pending','')+(aw?c(aw,'to approve','a'):'')+(od?c(od,'overdue','r'):'');
   host.title='Every '+(m.kind||'')+' meeting, all dates';
 }
+/* ---------- Recordings of meetings held in a room (27 Nov 2026, step 1 of 3) ----------
+   A phone or laptop on the table records the meeting here. The sound goes to S3 (s3-sign, staff) in parts
+   of about two minutes, so a dead phone or a closed tab loses at most the last part. Parts are
+   <prefix>part-00001.<ext>, part-00002...; the first holds the file header, so joined in order they are
+   the whole recording. A file recorded elsewhere (a phone's voice recorder) can be uploaded instead, as
+   one part. Rows live in ops.meeting_recordings (ops_rec_start / _part / _finish / _list). Only the
+   starter or an editor may record or upload. Step 2 (transcribe on the server) and step 3 (review the
+   suggested tasks and notes) are not built yet: a recording ends as "Saved". */
+const WM_REC={on:null};          // the recording running on THIS device, if any
+const WM_RECS={};                // meeting id -> {at, rows} from ops_rec_list
+const WM_REC_PART_MS=120000;     // a part every two minutes
+function wmRecFmt(s){ s=Math.max(0,Math.floor(s||0)); const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60; return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0'); }
+function wmRecMins(s){ s=Number(s)||0; return !s?'':s<60?'under 1 min':Math.round(s/60)+' min'; }
+function wmRecExt(mime,name){ const n=String(name||'').match(/\.([a-z0-9]{2,5})$/i); if(n) return n[1].toLowerCase();
+  return /mp4|m4a|aac/.test(mime)?'m4a':/ogg/.test(mime)?'ogg':/mpeg|mp3/.test(mime)?'mp3':/wav/.test(mime)?'wav':'webm'; }
+function wmRecKey(R,n){ return R.prefix+'part-'+String(n).padStart(5,'0')+'.'+R.ext; }
+// One file to S3 through a signed link; onPct gets 0-100 while it goes (a big upload needs to show it is moving).
+async function wmS3Put(key,blob,onPct){
+  const s=await s3Sign('put',key); if(s.error) throw new Error(s.error.message);
+  await new Promise((res,rej)=>{ const x=new XMLHttpRequest(); x.open('PUT',s.data.url);
+    x.setRequestHeader('Content-Type',blob.type||'application/octet-stream');
+    if(onPct&&x.upload) x.upload.onprogress=e=>{ if(e.lengthComputable) onPct(Math.round(e.loaded*100/e.total)); };
+    x.onload=()=>x.status>=200&&x.status<300?res():rej(new Error('upload stopped ('+x.status+')'));
+    x.onerror=()=>rej(new Error('no connection')); x.send(blob); });
+}
+
+/* The header button: Record, or the running clock with Stop. */
+function wmRecBtnHtml(m){
+  const R=WM_REC.on;
+  if(R&&R.meeting===m.id) return `<div class="wm-recon" title="Recording on this device"><i class="dot"></i><b id="wmRecT">${wmRecFmt(R.secs)}</b><button class="wm-recstop" onclick="wmRecStop()" ${R.stopping?'disabled':''}><i class="fa-solid ${R.stopping?'fa-spinner fa-spin':'fa-stop'}"></i> ${R.stopping?'Saving…':'Stop'}</button></div>`;
+  if(R||!wmCanEdit(m.id)||WM.ro) return '';
+  return `<button class="wm-recb" onclick="wmRecStart()" title="Record this meeting - put this phone or laptop in the middle of the table"><i class="fa-solid fa-microphone"></i> Record</button>`;
+}
+/* Under the header: the live recording's banner, an upload's progress, and this meeting's recordings. */
+function wmRecsHtml(m){
+  const R=WM_REC.on&&WM_REC.on.meeting===m.id?WM_REC.on:null, U=WM.recUp&&WM.recUp.meeting===m.id?WM.recUp:null;
+  const rows=((WM_RECS[m.id]||{}).rows||[]).filter(r=>!(R&&r.id===R.id)&&!(U&&r.id===U.id));
+  let h='';
+  if(R) h+=`<div class="wm-recbar"><i class="dot"></i><div><b>${R.stopping?'Saving the recording…':'Recording'}</b> - tell everyone in the room. Keep this screen on and this page open until you press Stop.
+    <small>${R.saved} part${R.saved===1?'':'s'} saved - sound is saved every 2 minutes${R.queue.length?` · ${R.queue.length} waiting to upload${R.err?' (no connection - it keeps trying)':''}`:''}</small></div></div>`;
+  if(U) h+=`<div class="wm-recbar up"><i class="fa-solid fa-cloud-arrow-up"></i><div><b>Uploading ${esc(U.name)}</b> - keep this page open.<small>${U.pct}%</small><span class="bar"><i style="width:${U.pct}%"></i></span></div></div>`;
+  if(rows.length){
+    const st=r=>r.status==='saved'?'saved - the transcript comes later':r.status==='transcribing'?'transcribing…':r.status==='ready'?'transcript ready':r.status==='failed'?'not saved'+(r.error_text?' - '+r.error_text:'')
+      :(Date.now()-new Date(r.started_at).getTime()>6*3600e3?'stopped before it finished - the parts that arrived are kept':r.source==='uploaded'?'uploading on another device':'recording on another device');
+    h+=`<div class="wm-reclist">`+rows.map(r=>{ const what=r.source==='uploaded'?esc(r.file_name||'Uploaded file'):'Recorded '+esc(wmClock(r.started_at))+(r.ended_at?' – '+esc(wmClock(r.ended_at)):'');
+      const d=wmRecMins(r.duration_seconds);
+      return `<span class="wm-recrow ${r.status}" title="${esc((r.source==='uploaded'?'Uploaded':'Recorded')+' by '+wmName(r.created_by))}"><i class="fa-solid ${r.source==='uploaded'?'fa-file-audio':'fa-microphone'}"></i>${what}${d?' · '+d:''} · ${esc(st(r))}</span>`; }).join('')+`</div>`;
+  }
+  return h;
+}
+function wmPaintRecUi(){
+  const m=wmMeeting(WM.cur); if(!m) return;
+  const b=$('wmRecBtn'); if(b) b.innerHTML=wmRecBtnHtml(m);
+  const h=$('wmRecs'); if(h) h.innerHTML=wmRecsHtml(m);
+}
+async function wmLoadRecs(id,force){
+  const c=WM_RECS[id]; if(!force&&c&&Date.now()-c.at<30000) return;
+  WM_RECS[id]={at:Date.now(),rows:c?c.rows:[]};
+  try{ const {data,error}=await sb.rpc('ops_rec_list',{p_meeting:id}); if(error) throw error; WM_RECS[id]={at:Date.now(),rows:data||[]}; }catch(e){ return; }
+  if(WM.cur===id) wmPaintRecUi();
+}
+// Off the meeting page (or on another meeting) a dark pill keeps the recording in sight and leads back.
+function wmRecPill(R){
+  let p=$('wmRecPill'); const onPage=!!$('wmRecT');
+  if(!R||onPage){ if(p) p.remove(); return; }
+  if(!p){ p=document.createElement('button'); p.id='wmRecPill'; p.className='wm-recpill'; p.onclick=()=>wmOpenMeeting(R.meeting); document.body.appendChild(p); }
+  p.innerHTML='<i class="dot"></i> Recording '+esc(R.kind||'')+' · '+wmRecFmt(R.secs);
+}
+
+window.wmRecStart=async function(){
+  const m=wmMeeting(WM.cur); if(!m||WM_REC.on||!wmCanEdit(m.id)||WM.ro) return;
+  if(typeof MediaRecorder==='undefined'||!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    toast('This browser cannot record. Use Chrome, or record on the phone and use More → Upload a recording.','err'); return; }
+  if(!confirm('Record this meeting?\n\nTell everyone in the room it is being recorded. Put this phone or laptop in the middle of the table and keep this screen on until you press Stop.')) return;
+  let stream;
+  try{ stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}}); }
+  catch(e){ toast('Allow the microphone for this site to record.','err'); return; }
+  let mime=['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg'].find(t=>MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(t))||'', rec;
+  try{ rec=mime?new MediaRecorder(stream,{mimeType:mime,audioBitsPerSecond:32000}):new MediaRecorder(stream); }catch(e){ rec=new MediaRecorder(stream); }
+  mime=rec.mimeType||mime||'audio/webm';
+  let row;
+  try{ const {data,error}=await sb.rpc('ops_rec_start',{p_meeting:m.id,p_source:'recorded',p_mime:mime,p_file_name:null}); if(error) throw error;
+    row=Array.isArray(data)?data[0]:data; if(!row||!row.id) throw new Error('no recording was made'); }
+  catch(e){ stream.getTracks().forEach(t=>t.stop()); toast('Could not start the recording: '+(e.message||e),'err'); return; }
+  const R=WM_REC.on={meeting:m.id,kind:m.kind,rec,stream,id:row.id,prefix:row.s3_prefix,mime:mime.split(';')[0],ext:wmRecExt(mime),buf:[],part:0,saved:0,queue:[],busy:false,t0:Date.now(),secs:0,err:''};
+  rec.ondataavailable=e=>{ if(e.data&&e.data.size) R.buf.push(e.data); };
+  rec.onerror=()=>wmRecStop();
+  stream.getAudioTracks().forEach(t=>t.onended=()=>{ if(WM_REC.on===R&&!R.stopping){ toast('The microphone stopped - the recording is being saved.','err'); wmRecStop(); } });
+  rec.start(1000);
+  R.timer=setInterval(()=>{ R.secs=Math.floor((Date.now()-R.t0)/1000); const t=$('wmRecT'); if(t) t.textContent=wmRecFmt(R.secs); wmRecPill(R); },1000);
+  R.cutT=setInterval(()=>wmRecCut(R),WM_REC_PART_MS);
+  try{ if(navigator.wakeLock) R.wake=await navigator.wakeLock.request('screen'); }catch(e){}
+  document.addEventListener('visibilitychange',wmRecVis);
+  window.addEventListener('beforeunload',wmRecUnload);
+  WM_RECS[m.id]=null; toast('Recording - tell everyone in the room','ok'); wmPaintRecUi();
+};
+// Hidden (screen off, another app): save what there is now; back again: keep the screen awake again.
+async function wmRecVis(){
+  const R=WM_REC.on; if(!R) return;
+  if(document.visibilityState==='hidden') wmRecCut(R);
+  else if(!R.stopping){ try{ if(navigator.wakeLock) R.wake=await navigator.wakeLock.request('screen'); }catch(e){} }
+}
+function wmRecUnload(e){ if(!WM_REC.on) return; wmRecCut(WM_REC.on); e.preventDefault(); e.returnValue=''; return ''; }
+// Close the current part and send it; parts go one at a time, in order, and a failed one is tried again.
+function wmRecCut(R){ if(!R||!R.buf.length) return; R.part++; R.queue.push({n:R.part,blob:new Blob(R.buf.splice(0),{type:R.mime})}); wmRecPump(R); }
+async function wmRecPump(R){
+  if(R.busy) return; R.busy=true;
+  try{ while(R.queue.length){ const p=R.queue[0];
+      try{ await wmS3Put(wmRecKey(R,p.n),p.blob);
+        const {error}=await sb.rpc('ops_rec_part',{p_id:R.id,p_part:p.n,p_bytes:p.blob.size}); if(error) throw error;
+        R.queue.shift(); R.saved=p.n; R.err=''; }
+      catch(e){ R.err=String(e.message||e); break; } } }
+  finally{ R.busy=false; if(WM.cur===R.meeting) wmPaintRecUi(); }
+}
+window.wmRecStop=async function(){
+  const R=WM_REC.on; if(!R||R.stopping) return; R.stopping=true; wmPaintRecUi();
+  clearInterval(R.cutT); clearInterval(R.timer); R.secs=Math.floor((Date.now()-R.t0)/1000);
+  await new Promise(res=>{ R.rec.onstop=res; try{ if(R.rec.state==='inactive') res(); else R.rec.stop(); }catch(e){ res(); } });
+  R.stream.getTracks().forEach(t=>t.stop());
+  try{ if(R.wake) R.wake.release(); }catch(e){}
+  document.removeEventListener('visibilitychange',wmRecVis);
+  wmRecCut(R);
+  // Keep trying until every part is on the server; only then is the recording closed.
+  for(let i=0;;i++){
+    while(R.busy) await new Promise(r=>setTimeout(r,300));
+    if(!R.queue.length) break;
+    await wmRecPump(R);
+    if(!R.queue.length) break;
+    if(i===2) toast('Some of the sound has not reached the server yet - keep this page open, it keeps trying.','err');
+    await new Promise(r=>setTimeout(r,Math.min(30000,3000*(i+1))));
+  }
+  try{ const {error}=await sb.rpc('ops_rec_finish',{p_id:R.id,p_seconds:R.secs}); if(error) throw error; }
+  catch(e){ toast('The sound is saved, but the recording could not be closed: '+(e.message||e),'err'); }
+  WM_REC.on=null; window.removeEventListener('beforeunload',wmRecUnload); wmRecPill(null);
+  toast('Recording saved'+(R.secs>=60?' - '+wmRecMins(R.secs):''),'ok');
+  WM_RECS[R.meeting]=null; if(WM.cur===R.meeting){ wmPaintRecUi(); wmLoadRecs(R.meeting,true); }
+};
+
+/* More → Upload a recording: a file recorded on a phone (or anywhere) for this meeting, any date. */
+window.wmRecUpload=function(){
+  const m=wmMeeting(WM.cur); if(!m||!wmCanEdit(m.id)||WM.ro) return;
+  if(WM.recUp){ toast('An upload is already going - wait for it to finish.','err'); return; }
+  const inp=document.createElement('input'); inp.type='file';
+  inp.accept='audio/*,video/*,.m4a,.mp3,.wav,.aac,.ogg,.opus,.webm,.amr,.3gp,.mp4';
+  inp.onchange=()=>{ const f=inp.files&&inp.files[0]; if(f) wmRecUploadFile(m,f); };
+  inp.click();
+};
+function wmMediaSecs(f){
+  return new Promise(res=>{ let done=false; const u=URL.createObjectURL(f), a=document.createElement('audio');
+    const end=v=>{ if(done) return; done=true; URL.revokeObjectURL(u); res(v); };
+    a.preload='metadata'; a.onloadedmetadata=()=>end(isFinite(a.duration)?Math.round(a.duration):0); a.onerror=()=>end(0);
+    setTimeout(()=>end(0),8000); a.src=u; });
+}
+async function wmRecUploadFile(m,f){
+  if(!/^(audio|video)\//.test(f.type||'')&&!/\.(m4a|mp3|wav|aac|ogg|opus|webm|amr|3gp|mp4)$/i.test(f.name)){ toast('Pick a sound (or video) file of the meeting.','err'); return; }
+  if(f.size>1024*1024*1024){ toast('That file is over 1 GB - send a shorter or smaller copy.','err'); return; }
+  const secs=await wmMediaSecs(f);
+  let row;
+  try{ const {data,error}=await sb.rpc('ops_rec_start',{p_meeting:m.id,p_source:'uploaded',p_mime:f.type||null,p_file_name:f.name}); if(error) throw error;
+    row=Array.isArray(data)?data[0]:data; if(!row||!row.id) throw new Error('no recording was made'); }
+  catch(e){ toast('Could not start the upload: '+(e.message||e),'err'); return; }
+  const U=WM.recUp={meeting:m.id,id:row.id,name:f.name,pct:0};
+  const paint=()=>{ if(WM.cur===m.id) wmPaintRecUi(); }; paint();
+  const warn=e=>{ e.preventDefault(); e.returnValue=''; return ''; }; window.addEventListener('beforeunload',warn);
+  try{
+    await wmS3Put(wmRecKey({prefix:row.s3_prefix,ext:wmRecExt(f.type,f.name)},1),f,p=>{ if(p!==U.pct){ U.pct=p; const b=document.querySelector('.wm-recbar.up'); if(b){ b.querySelector('small').textContent=p+'%'; b.querySelector('.bar i').style.width=p+'%'; } } });
+    let r=await sb.rpc('ops_rec_part',{p_id:row.id,p_part:1,p_bytes:f.size}); if(r.error) throw r.error;
+    r=await sb.rpc('ops_rec_finish',{p_id:row.id,p_seconds:secs}); if(r.error) throw r.error;
+    toast('Recording uploaded'+(secs>=60?' - '+wmRecMins(secs):''),'ok');
+  }catch(e){ toast('The upload stopped: '+(e.message||e)+'. Try again.','err'); try{ await sb.rpc('ops_rec_finish',{p_id:row.id,p_seconds:secs}); }catch(_e){} }
+  finally{ WM.recUp=null; window.removeEventListener('beforeunload',warn); WM_RECS[m.id]=null; paint(); wmLoadRecs(m.id,true); }
+}
+
 function wmPaintBoard(){
   clearInterval(WM.timer);
   const main=$('wmMain'); if(!main) return;
@@ -575,14 +748,16 @@ function wmPaintBoard(){
           <div class="wm-more" id="wmMore"><button class="wm-quiet" onclick="wmMoreToggle(event)" aria-haspopup="true" aria-expanded="false"><i class="fa-solid fa-ellipsis"></i> More</button>
             <div class="wm-more-panel" style="display:none">
               <div class="wm-more-info">${moreInfo}</div>
+              ${wmCanEdit(m.id)&&!WM.ro?`<button class="it" onclick="wmMoreToggle();wmRecUpload()"><i class="fa-solid fa-file-audio"></i> Upload a recording</button>`:''}
               ${canRs?`<button class="it" onclick="wmMoreToggle();wmReschedule(${m.id})"><i class="fa-regular fa-calendar"></i> Reschedule</button>`:''}
               ${others.length?`<div class="wm-more-h">Earlier and later ${esc(m.kind||'')} meetings</div>`+others.map(x=>`<button class="it" onclick="wmOpenMeeting(${x.id})"><i class="fa-regular fa-calendar-check"></i> ${esc(x.meeting_date===today?'Today':wmFmt(x.meeting_date))}${x.start_time?', '+esc(wmTime(x.start_time)):''}</button>`).join(''):''}
               ${canStop?`<button class="it danger" onclick="wmMoreToggle();wmSeriesStop(${m.series_id})"><i class="fa-solid fa-ban"></i> Stop repeating</button>`:''}
             </div></div>
         </div>
       </div>
-      ${isToday&&!ended?`<div class="wm-mh-r">${started?`<div class="wm-clock" title="Meeting running since ${esc(wmClock(started))}"><i class="fa-regular fa-clock"></i><b id="wmTimer">0m 00s</b></div>`:''}<button class="wm-btn wm-red" onclick="wmEndMeeting()">End meeting</button></div>`:''}
+      ${isToday&&!ended?`<div class="wm-mh-r">${started?`<div class="wm-clock" title="Meeting running since ${esc(wmClock(started))}"><i class="fa-regular fa-clock"></i><b id="wmTimer">0m 00s</b></div>`:''}<span id="wmRecBtn"></span><button class="wm-btn wm-red" onclick="wmEndMeeting()">End meeting</button></div>`:''}
     </div>
+    <div class="wm-recs" id="wmRecs"></div>
     ${m.agenda?'<div class="wm-ag wm-bd-ag" id="wmAg"></div>':`<div class="wm-addsec" style="margin:0 22px 16px"><button class="wm-quiet" onclick="wmAgAdd()"><i class="fa-solid fa-stopwatch"></i> Run this meeting on the timed agenda</button></div>`}
   </div>
   <div class="wm-card wm-bd-ws" id="wmWs">
@@ -598,6 +773,7 @@ function wmPaintBoard(){
   </div>`;
   if(!WM.wtab){ const s0=m.agenda?wmAgState(m):null; WM.wtab=s0&&s0.run&&!s0.done&&!s0.finished&&s0.items[s0.i]?wmTabOf(s0.items[s0.i].k):'td'; }
   wmRepaintKpi(); wmRepaintTd(); wmRepaintOo(); wmParse(); wmPaintDrafts(); wmPaintTabs(); wmPaintWTabs();
+  wmPaintRecUi(); wmLoadRecs(m.id); wmRecPill(WM_REC.on);
   if(m.agenda) wmPaintAgenda(true);
   if(isToday&&started&&!ended){
     const tick=()=>{ const t=$('wmTimer'); if(!t) return; const x=Math.max(0,Math.floor((Date.now()-started)/1000)), hh=Math.floor(x/3600), mm=Math.floor(x%3600/60), ss=x%60;
@@ -2601,4 +2777,21 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-tdb-none{grid-column:1/-1}.wm-tdb-none .wm-td-empty{padding:12px}'
   +'.wm-cap-in .wm-cap-sec{flex:none;display:inline-flex;align-items:center;margin:0 8px}'
   +'@media(max-width:600px){.wm-ws-cap .wm-cap-in{flex-wrap:wrap;row-gap:6px}.wm-ws-cap .wm-cap-in input{flex:1 1 calc(100% - 30px);min-width:0}.wm-ws-cap .wm-cap-in .kbd{display:none}.wm-cap-in .wm-cap-sec{margin:0 0 0 23px}}'
+  +'.wm-recb{display:inline-flex;align-items:center;gap:6px;border:1px solid #F3C4CC;background:#fff;color:#C2263E;border-radius:10px;padding:7px 13px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;margin-right:8px}'
+  +'.wm-recb:hover{background:#FFF5F6}'
+  +'.wm-recon{display:inline-flex;align-items:center;gap:8px;background:#FDECEE;border:1px solid #F3C4CC;border-radius:10px;padding:4px 5px 4px 11px;color:#B3263E;font-size:13px;margin-right:8px}'
+  +'.wm-recon b{font-variant-numeric:tabular-nums;min-width:38px}'
+  +'.wm-recstop{display:inline-flex;align-items:center;gap:5px;border:0;background:#C2263E;color:#fff;border-radius:7px;padding:5px 10px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}.wm-recstop:disabled{opacity:.7;cursor:default}'
+  +'.wm-recon .dot,.wm-recbar .dot,.wm-recpill .dot{flex:none;width:9px;height:9px;border-radius:50%;background:#E0313F;animation:wmRecBl 1.2s infinite}'
+  +'@keyframes wmRecBl{50%{opacity:.25}}'
+  +'.wm-recs{margin:0 22px 14px;display:flex;flex-direction:column;gap:8px}.wm-recs:empty{display:none}'
+  +'.wm-recbar{display:flex;gap:10px;align-items:flex-start;background:#FFF5F6;border:1px solid #F6D3D9;border-radius:10px;padding:9px 12px;font-size:12.5px;color:#4A4F63;line-height:1.45}'
+  +'.wm-recbar .dot{margin-top:5px}.wm-recbar>div{flex:1;min-width:0}.wm-recbar small{display:block;color:#7A8095;margin-top:2px;font-size:11.5px}'
+  +'.wm-recbar.up{background:#F4F2FF;border-color:#DDD8FF}.wm-recbar.up>i{color:#5B4BE8;margin-top:2px}'
+  +'.wm-recbar .bar{display:block;height:5px;background:#E6E3FA;border-radius:3px;margin-top:5px;overflow:hidden}.wm-recbar .bar i{display:block;height:100%;background:#5B4BE8;transition:width .3s}'
+  +'.wm-reclist{display:flex;flex-wrap:wrap;gap:6px}'
+  +'.wm-recrow{display:inline-flex;align-items:center;gap:6px;max-width:100%;font-size:12px;color:#4A4F63;background:#F6F7FA;border:1px solid #ECEEF3;border-radius:20px;padding:3px 10px}'
+  +'.wm-recrow i{color:#9AA0B4}.wm-recrow.failed{color:#B3263E;background:#FDECEE;border-color:#F6D3D9}.wm-recrow.ready i{color:#1E8A55}'
+  +'.wm-recpill{position:fixed;right:16px;bottom:16px;z-index:60;display:inline-flex;align-items:center;gap:8px;background:#1C1F2E;color:#fff;border:0;border-radius:22px;padding:9px 14px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.2)}'
+  +'@media(max-width:600px){.wm-recs{margin:0 14px 12px}.wm-recb,.wm-recon{margin-right:6px}}'
 +'</style>';
