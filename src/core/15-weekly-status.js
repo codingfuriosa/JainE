@@ -760,20 +760,58 @@ window.wmRecOpen=async function(id){
   try{ const {data,error}=await sb.rpc('ops_rec_get',{p_id:id}); if(error) throw error; r=Array.isArray(data)?data[0]:data; if(!r) throw new Error('not found'); }
   catch(e){ toast('Could not open the transcript: '+(e.message||e),'err'); return; }
   const g=r.suggestions||{}, same=!r.transcript_en||r.transcript_en===r.transcript;
-  WM.recView={r,t:r.transcript||'',en:r.transcript_en||'',edit:null,busy:null};
-  const tx=t=>t?`<div class="wm-rt-tx">${esc(t).replace(/\n/g,'<br>')}</div>`:'<div class="wm-mute">No speech was heard.</div>';
+  WM.recView={r,t:r.transcript||'',en:r.transcript_en||'',edit:null,busy:null,txk:'t',spk:false};
   openModal(`<div class="modal-head"><h3>Meeting recording${r.duration_seconds?' · '+wmRecMins(r.duration_seconds):''}${g.languages?' · '+esc(g.languages):''}</h3><span class="x" onclick="wmRecClose()">&times;</span></div>
     <div class="modal-body wm-rt">
       <div class="wm-rt-note"><i class="fa-solid fa-circle-info"></i> Written by AI from the sound - check names and dates.${wmRecCanAct()?' Add puts it in this meeting just as typing it on the action line would; Edit lets you change it first.':''}</div>
       ${r.summary?`<div class="wm-rt-sec"><h4>Summary</h4><div class="wm-rt-sum">${esc(r.summary).replace(/\n/g,'<br>')}</div></div>`:''}
       <div id="wmRtSug">${wmRecSugHtml()}</div>
-      <div class="wm-rt-sec"><h4>Transcript${same?'':` <span class="wm-rt-tg"><button type="button" class="on" onclick="wmRecTx(this,'t')">As spoken</button><button type="button" onclick="wmRecTx(this,'en')">English</button></span>`}</h4><div id="wmRtTx">${tx(r.transcript)}</div></div>
+      <div class="wm-rt-sec"><h4>Transcript${wmRecCanAct()&&wmRecLabels().size?` <button type="button" class="wm-quiet wm-rt-spkb" onclick="wmRecSpk(true)"><i class="fa-solid fa-user-pen"></i> Name the speakers</button>`:''}${same?'':` <span class="wm-rt-tg"><button type="button" class="on" onclick="wmRecTx(this,'t')">As spoken</button><button type="button" onclick="wmRecTx(this,'en')">English</button></span>`}</h4><div id="wmRtSpk"></div><div id="wmRtTx">${wmRecTxHtml(r.transcript)}</div></div>
     </div>`);
   const md=document.querySelector('.modal'); if(md) md.classList.add('wm-rt-modal');
 };
 window.wmRecClose=function(){ const v=WM.recView; closeModal(); if(v&&v.r){ WM_RECS[v.r.meeting_id]=null; if(WM.cur===v.r.meeting_id) wmLoadRecs(v.r.meeting_id,true); } };
-window.wmRecTx=function(b,k){ const v=WM.recView||{}, t=k==='en'?v.en:v.t; [...b.parentNode.children].forEach(x=>x.classList.toggle('on',x===b));
-  const h=$('wmRtTx'); if(h) h.innerHTML=t?'<div class="wm-rt-tx">'+esc(t).replace(/\n/g,'<br>')+'</div>':'<div class="wm-mute">No speech was heard.</div>'; };
+window.wmRecTx=function(b,k){ const v=WM.recView||{}; v.txk=k; [...b.parentNode.children].forEach(x=>x.classList.toggle('on',x===b)); wmRecPaintTx(); };
+/* 28 Nov: naming the speakers. The transcriber labels voices "Speaker 1", "Speaker 2"... (a name only when the
+   recording proves it); the starter or an editor says who each one is, kept on the recording in
+   suggestions.speakers (ops_rec_speakers) and shown in place of the label in both transcripts, for everyone. */
+const WM_REC_LBL=/^(\s*)([^:\n]{1,40}):(.*)$/;
+// The labels of both transcripts, in order of first appearance: {lines, first words said}.
+function wmRecLabels(){
+  const v=WM.recView||{}, m=new Map();
+  [v.t,v.en].forEach((t,ti)=>String(t||'').split('\n').forEach(l=>{ const x=l.match(WM_REC_LBL); if(!x) return; const k=x[2].trim();
+    const o=m.get(k)||{n:0,first:'',firstEn:''}; if(ti===0) o.n++; if(ti===0&&!o.first) o.first=x[3].trim(); if(ti===1&&!o.firstEn) o.firstEn=x[3].trim(); m.set(k,o); }));
+  return m;
+}
+function wmRecTxHtml(t){
+  if(!t) return '<div class="wm-mute">No speech was heard.</div>';
+  const sp=((WM.recView.r.suggestions||{}).speakers)||{};
+  return '<div class="wm-rt-tx">'+String(t).split('\n').map(l=>{ const x=l.match(WM_REC_LBL); if(!x) return esc(l);
+    const k=x[2].trim(), nm=sp[k]; return `<b class="${nm?'nm':'sp'}"${nm?` title="Labelled ${esc(k)} by the transcriber"`:''}>${esc(nm||k)}:</b>${esc(x[3])}`; }).join('<br>')+'</div>';
+}
+function wmRecPaintTx(){ const v=WM.recView, h=$('wmRtTx'); if(h) h.innerHTML=wmRecTxHtml(v.txk==='en'?v.en:v.t); }
+window.wmRecSpk=function(open){
+  const v=WM.recView, h=$('wmRtSpk'); if(!h) return; v.spk=open;
+  if(!open){ h.innerHTML=''; return; }
+  const sp=((v.r.suggestions||{}).speakers)||{}, labs=wmRecLabels(), m=wmMeeting(v.r.meeting_id), here=new Set((m&&m.attendees)||[]);
+  const ppl=(WM.people||[]).map(p=>p.name), inRoom=ppl.filter(n=>here.has(n)), rest=ppl.filter(n=>!here.has(n));
+  const opts=cur=>{ const o=n=>`<option value="${esc(n)}" ${cur===n?'selected':''}>${esc(n)}</option>`;
+    return '<option value="">Not named</option>'+(cur&&!ppl.includes(cur)?o(cur):'')
+      +(inRoom.length?`<optgroup label="In this meeting">${inRoom.map(o).join('')}</optgroup><optgroup label="Everyone else">${rest.map(o).join('')}</optgroup>`:rest.map(o).join('')); };
+  const cut=t=>{ t=String(t||''); return t.length>70?t.slice(0,70)+'…':t; };
+  h.innerHTML=`<div class="wm-rt-spk"><div class="hd">Who is each voice? Pick a person - the transcript shows the name instead, for everyone.</div>${[...labs].map(([k,o],i)=>
+    `<div class="row"><div class="lb"><b>${esc(k)}</b><small>${o.n} line${o.n===1?'':'s'}${o.firstEn||o.first?' · “'+esc(cut(o.firstEn||o.first))+'”':''}</small></div><select data-k="${esc(k)}">${opts(sp[k]||'')}</select></div>`).join('')}
+    <div class="b"><button class="wm-btn wm-sm" onclick="wmRecSpkSave(this)">Save names</button><button class="wm-quiet" onclick="wmRecSpk(false)">Cancel</button></div></div>`;
+};
+window.wmRecSpkSave=async function(btn){
+  const v=WM.recView; if(!wmRecCanAct()) return;
+  const map={}; document.querySelectorAll('#wmRtSpk select[data-k]').forEach(sel=>{ if(sel.value) map[sel.getAttribute('data-k')]=sel.value; });
+  btn.disabled=true;
+  try{ const {data,error}=await sb.rpc('ops_rec_speakers',{p_id:v.r.id,p_map:map}); if(error) throw error;
+    v.r.suggestions=Object.assign({},v.r.suggestions||{},{speakers:data||{}}); wmRecSpk(false); wmRecPaintTx();
+    const n=Object.keys(data||{}).length; toast(n?n+' speaker'+(n===1?'':'s')+' named':'Speaker names cleared','ok'); }
+  catch(e){ btn.disabled=false; wmErr('Could not save the names',e); }
+};
 window.wmRecEdit=function(k){ WM.recView.edit=k; wmRecPaintSug(); const i=$('wmRtTitle'); if(i){ i.focus(); i.select(); } };
 async function wmRecSave(k,state,ref){
   const v=WM.recView; const {data,error}=await sb.rpc('ops_rec_mark',{p_id:v.r.id,p_key:k,p_state:state,p_ref:ref||null}); if(error) throw error;
@@ -2960,4 +2998,13 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-rt-f>input{width:100%;box-sizing:border-box}.wm-rt-f .r{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.wm-rt-f .r select:first-child{flex:1 1 200px}'
   +'.wm-rt-f .b{display:flex;gap:12px;align-items:center;margin-top:8px}'
   +'@media(max-width:600px){.wm-rt-it{flex-wrap:wrap}.wm-rt-acts,.wm-rt-st{margin-left:0;width:100%;padding-left:2px}}'
+  +'.wm-rt-spkb{margin-left:8px;font-size:12px;text-transform:none;letter-spacing:0;font-weight:700}'
+  +'.wm-rt-tx b.sp{color:#5D6378}.wm-rt-tx b.nm{color:#4A3FC0}'
+  +'.wm-rt-spk{background:#F4F2FF;border:1px solid #DDD8FF;border-radius:10px;padding:10px 12px;margin:0 0 10px}'
+  +'.wm-rt-spk .hd{font-size:12.5px;color:#4A3FC0;margin-bottom:6px}'
+  +'.wm-rt-spk .row{display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid #E6E3FA}.wm-rt-spk .row:first-of-type{border-top:0}'
+  +'.wm-rt-spk .lb{flex:1;min-width:0}.wm-rt-spk .lb small{display:block;color:#7A8095;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+  +'.wm-rt-spk select{flex:0 0 190px;font:inherit;font-size:13px;border:1px solid #DADDE6;border-radius:7px;padding:6px 8px;background:#fff;min-width:0}'
+  +'.wm-rt-spk .b{display:flex;gap:12px;align-items:center;margin-top:8px}'
+  +'@media(max-width:600px){.wm-rt-spk .row{flex-wrap:wrap}.wm-rt-spk select{flex:1 1 100%}}'
 +'</style>';

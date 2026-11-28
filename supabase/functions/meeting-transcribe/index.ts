@@ -1,4 +1,8 @@
 // meeting-transcribe - JainE-Meetings recordings, step 2 of 3 (27 Nov 2026).
+// 28 Nov 2026: speakers are no longer guessed. With all staff names in the prompt the model labelled a voice
+// "Rishi Jain" though no one said that name. Now every turn is "Speaker N" unless the recording itself proves
+// the name (said by that speaker, or called and answered); the staff list is only for spelling and task owners.
+// The starter or an editor names the speakers afterwards in the transcript window (ops_rec_speakers).
 //
 // Takes ONE saved recording (ops_rec_claim), joins its parts from S3 (portal/meetings/recordings/
 // <meeting>/<recording>/part-00001.<ext>, part-00002...; the first part holds the file header, so the
@@ -125,15 +129,22 @@ held in a room on ${day}${rec.start_time ? " at " + String(rec.start_time).slice
 often mixed in one sentence. Words you will hear: JainE / JAIN-E (the company's own software), FarVision (a software; never
 "Fire Vision"), CRM, RERA, site, flat, booking, possession, Dream Gurukul, Dream Pailan, Jain Group.
 
-People marked present: ${att}
-Everyone in the company (use these exact spellings when a name is said):
+People marked present in JainE (they may not all speak, and others may speak): ${att}
+Everyone in the company - ONLY to spell correctly a name that is actually said aloud, and to fill "person" on a task.
+Never use this list to guess who is speaking:
 ${staff}
+
+WHO IS SPEAKING. You cannot know who a voice belongs to, so do not guess. Label every turn "Speaker 1:", "Speaker 2:"...
+(the same number for the same voice all the way through, numbered in the order they first speak). Use a person's name
+instead ONLY when the recording itself proves it: that speaker says their own name ("Pallabi Deb here"), or is called
+by name and answers in the very next turn. The name must be one you heard in the recording, never one taken from the
+lists above. When in doubt, keep "Speaker N".
 
 Reply with ONE JSON object, nothing else:
 {
   "languages": "the languages spoken, e.g. English, Hindi",
-  "transcript": "everything said, in order, one line per turn: 'Name: words' when you can tell who is speaking from the talk itself (someone is addressed by name, or says who they are), otherwise 'Speaker 1:', 'Speaker 2:' kept the same for the same voice. Write each turn in the language it was spoken (Hindi in Devanagari, Bengali in Bengali script). Leave out only silence and noise.",
-  "transcript_en": "the same transcript in English, turn by turn, with the same names / Speaker labels. If everything was in English, repeat it.",
+  "transcript": "everything said, in order, one line per turn, each line starting with its label and a colon ('Speaker 1: ...', or a proven name as above). Write each turn in the language it was spoken (Hindi in Devanagari, Bengali in Bengali script). Leave out only silence and noise.",
+  "transcript_en": "the same transcript in English, turn by turn, with exactly the same labels on the same lines. If everything was in English, repeat it.",
   "summary": "5 to 10 short lines in plain English, each starting with '- ': what was discussed and agreed.",
   "decisions": ["each decision taken, one short English sentence"],
   "tasks": [{"title": "what is to be done, a short English imperative ('Send the revised price sheet to sales')",
